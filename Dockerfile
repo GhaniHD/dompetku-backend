@@ -1,20 +1,22 @@
-FROM golang:1.25-alpine
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-# Copy dependency files
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy all source code
 COPY . .
 
-# Build the application
-# Pastikan path ini sesuai dengan struktur project Anda
-RUN go build -o /app/main ./cmd/app/main.go
+RUN go build -o main ./cmd/app/main.go
 
-# Expose port
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates tzdata
+
+WORKDIR /app
+
+COPY --from=builder /app/main .
+
 EXPOSE 8090
 
-# Run the application
-CMD ["/app/main"]
+CMD ["./main"]

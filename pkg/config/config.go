@@ -32,14 +32,14 @@ func NewAppConf() (*AppConf, error) {
 	log.Println("DB_USER:", os.Getenv("DB_USER"))
 
 	return &AppConf{
-		DBHost:     getEnv("DB_HOST", "db"),  // ← Balik ke "db"
+		DBHost:     getEnv("DB_HOST", "db"),
 		DBPort:     getEnv("DB_PORT", "5432"),
 		DBUser:     getEnv("DB_USER", "postgres"),
 		DBPass:     getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "dompetku"),
 		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
 		JWTSecret:  getEnv("JWT_SECRET", "your-secret-key"),
-		ServerPort: getEnv("SERVER_PORT", "8090"),
+		ServerPort:   getEnv("PORT", getEnv("SERVER_PORT", "8090")),
 		ClaudeAPIKey: os.Getenv("CLAUDE_API_KEY"),
 	}, nil
 }
