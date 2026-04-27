@@ -12,7 +12,7 @@ func CORSMiddleware() gin.HandlerFunc {
 		// Daftar origin yang diizinkan mengakses API
 		AllowOrigins: []string{
 			"http://localhost:5173",
-			"https://dompetku-new.vercel.app/",
+			"https://dompetku-new.vercel.app",
 		},
 
 		// Method HTTP yang diizinkan
