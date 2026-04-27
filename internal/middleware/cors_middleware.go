@@ -10,7 +10,10 @@ import (
 func CORSMiddleware() gin.HandlerFunc {
 	return cors.New(cors.Config{
 		// Daftar origin yang diizinkan mengakses API
-		AllowOrigins: []string{"http://localhost:5173"},
+		AllowOrigins: []string{
+			"http://localhost:5173",
+			"https://dompetku-new.vercel.app/",
+		},
 
 		// Method HTTP yang diizinkan
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
