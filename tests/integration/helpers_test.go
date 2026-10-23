@@ -206,7 +206,8 @@ func expectReconciled(t *testing.T, u testUser) {
 			            FROM transactions t WHERE t.wallet_id = w.id AND t.deleted_at IS NULL), 0)
 			+ COALESCE((SELECT SUM(x.amount) FROM transfers x WHERE x.to_wallet_id = w.id AND x.deleted_at IS NULL), 0)
 			- COALESCE((SELECT SUM(x.amount) FROM transfers x WHERE x.from_wallet_id = w.id AND x.deleted_at IS NULL), 0)
-			+ COALESCE((SELECT SUM(a.amount) FROM balance_adjustments a WHERE a.wallet_id = w.id AND a.deleted_at IS NULL), 0)`,
+			+ COALESCE((SELECT SUM(a.amount) FROM balance_adjustments a WHERE a.wallet_id = w.id AND a.deleted_at IS NULL), 0)
+			+ COALESCE((SELECT SUM(m.wallet_delta) FROM debt_movements m WHERE m.wallet_id = w.id AND m.deleted_at IS NULL), 0)`,
 		u.ID)
 	if n != 0 {
 		t.Fatalf("%d dompet saldonya tidak cocok dengan riwayat transaksi/transfer", n)

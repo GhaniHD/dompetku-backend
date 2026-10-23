@@ -22,11 +22,11 @@ import (
 
 // ─── Sentinel errors (bisa ditangkap di handler dengan errors.Is) ─────────────
 var (
-	ErrEmailAlreadyUsed    = errors.New("email sudah digunakan akun lain")
-	ErrWrongPassword       = errors.New("password lama tidak sesuai")
-	ErrUserNotFound        = errors.New("user tidak ditemukan")
-	ErrInvalidFileType     = errors.New("format tidak didukung, gunakan JPG PNG atau WebP")
-	ErrFileTooLarge        = errors.New("ukuran file maksimal 2 MB")
+	ErrEmailAlreadyUsed = errors.New("email sudah digunakan akun lain")
+	ErrWrongPassword    = errors.New("password lama tidak sesuai")
+	ErrUserNotFound     = errors.New("user tidak ditemukan")
+	ErrInvalidFileType  = errors.New("format tidak didukung, gunakan JPG PNG atau WebP")
+	ErrFileTooLarge     = errors.New("ukuran file maksimal 2 MB")
 )
 
 type ProfileService interface {
@@ -70,16 +70,16 @@ func (s *profileService) buildResponse(ctx context.Context, user *model.User) (*
 	}
 
 	return &dto.ProfileResponse{
-		ID:           user.ID,
-		Name:         user.Name,
-		Email:        user.Email,
-		AvatarURL:    user.AvatarURL,
-		CreatedAt:    user.CreatedAt,
+		ID:        user.ID,
+		Name:      user.Name,
+		Email:     user.Email,
+		AvatarURL: user.AvatarURL,
+		CreatedAt: user.CreatedAt,
 
 		BudgetStartDay: budgetcycle.Normalize(user.BudgetStartDay),
-		TotalBalance: balance,
-		TotalTx:      txCount,
-		TotalWallet:  walletCount,
+		TotalBalance:   balance,
+		TotalTx:        txCount,
+		TotalWallet:    walletCount,
 	}, nil
 }
 
@@ -227,6 +227,7 @@ func (s *profileService) DeleteAccount(ctx context.Context, userID uuid.UUID) er
 
 	return s.profileRepo.DeleteAccount(ctx, userID)
 }
+
 // ─── UpdateBudgetCycle ────────────────────────────────────────────────────────
 
 func (s *profileService) UpdateBudgetCycle(ctx context.Context, userID uuid.UUID, req *dto.UpdateBudgetCycleRequest) (*dto.ProfileResponse, error) {

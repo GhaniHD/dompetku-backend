@@ -33,6 +33,9 @@ func NewRouter(
 	reportHandler *handler.ReportHandler,
 	analysisHandler *handler.AnalysisHandler,
 	transferHandler *handler.TransferHandler,
+	exportHandler *handler.ExportHandler,
+	recurringHandler *handler.RecurringHandler,
+	debtGoalHandler *handler.DebtGoalHandler,
 	userRepo repository.UserRepository,
 	cfg *config.AppConf,
 ) *gin.Engine {
@@ -63,6 +66,9 @@ func NewRouter(
 		reportHandler.RegisterRoutes(protected)
 		analysisHandler.RegisterRoutes(protected)
 		transferHandler.RegisterRoutes(protected)
+		exportHandler.RegisterRoutes(protected)
+		recurringHandler.RegisterRoutes(protected)
+		debtGoalHandler.RegisterRoutes(protected)
 	}
 
 	return r

@@ -57,6 +57,7 @@ func main() {
 		api.Module,
 
 		fx.Invoke(MigrateDB),
+		fx.Invoke(service.StartScheduler),
 		fx.Invoke(StartServer),
 	)
 

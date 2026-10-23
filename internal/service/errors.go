@@ -24,4 +24,13 @@ var (
 	ErrAdjustmentNoChange     = errors.New("saldo aktual sama dengan saldo tercatat, tidak ada yang disesuaikan")
 
 	ErrNotificationNotFound = errors.New("notifikasi tidak ditemukan")
+
+	ErrRecurringNotFound       = errors.New("transaksi berulang tidak ditemukan")
+	ErrRecurringEndBeforeStart = errors.New("tanggal akhir tidak boleh sebelum tanggal mulai")
+
+	ErrDebtNotFound        = errors.New("hutang/piutang tidak ditemukan")
+	ErrDebtPaymentNotFound = errors.New("pembayaran tidak ditemukan")
+	ErrDebtOverpaid        = errors.New("nominal pembayaran melebihi sisa hutang")
+	ErrGoalNotFound        = errors.New("target tabungan tidak ditemukan")
+	ErrGoalWalletTaken     = errors.New("dompet ini sudah dipakai target tabungan lain")
 )

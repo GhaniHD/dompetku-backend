@@ -25,9 +25,11 @@ import (
 )
 
 var (
-	server     *httptest.Server
-	gdb        *gorm.DB
-	fakeClaude *fakeClaudeServer
+	server       *httptest.Server
+	gdb          *gorm.DB
+	fakeClaude   *fakeClaudeServer
+	recurringSvc service.RecurringService
+	debtSvc      service.DebtService
 )
 
 func TestMain(m *testing.M) {
@@ -87,7 +89,7 @@ func run(m *testing.M) (int, error) {
 		repository.Module,
 		service.Module,
 		api.Module,
-		fx.Populate(&router, &gdb),
+		fx.Populate(&router, &gdb, &recurringSvc, &debtSvc),
 	)
 	if err := app.Err(); err != nil {
 		return 0, err

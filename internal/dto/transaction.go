@@ -7,22 +7,24 @@ import (
 )
 
 type TransactionResponse struct {
-	ID     uuid.UUID `json:"id"`
-	Amount float64   `json:"amount"`
-	Type   string    `json:"type"`
-	Note   string    `json:"note"`
-	Date   time.Time `json:"date"`
+	ID          uuid.UUID  `json:"id"`
+	RecurringID *uuid.UUID `json:"recurring_id,omitempty"`
+	Amount      float64    `json:"amount"`
+	Type        string     `json:"type"`
+	Note        string     `json:"note"`
+	Date        time.Time  `json:"date"`
 
 	WalletName   string `json:"wallet_name"`
 	CategoryName string `json:"category_name"`
 }
 
 type TransactionDetailResponse struct {
-	ID     uuid.UUID `json:"id"`
-	Amount float64   `json:"amount"`
-	Type   string    `json:"type"`
-	Note   string    `json:"note"`
-	Date   time.Time `json:"date"`
+	ID          uuid.UUID  `json:"id"`
+	RecurringID *uuid.UUID `json:"recurring_id,omitempty"`
+	Amount      float64    `json:"amount"`
+	Type        string     `json:"type"`
+	Note        string     `json:"note"`
+	Date        time.Time  `json:"date"`
 
 	Wallet struct {
 		ID   uuid.UUID `json:"id"`

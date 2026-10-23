@@ -24,10 +24,11 @@ const (
 type Alerter struct {
 	notif      NotificationService
 	budgetRepo repository.BudgetRepository
+	goalRepo   repository.GoalRepository
 }
 
-func NewAlerter(notif NotificationService, budgetRepo repository.BudgetRepository) *Alerter {
-	return &Alerter{notif: notif, budgetRepo: budgetRepo}
+func NewAlerter(notif NotificationService, budgetRepo repository.BudgetRepository, goalRepo repository.GoalRepository) *Alerter {
+	return &Alerter{notif: notif, budgetRepo: budgetRepo, goalRepo: goalRepo}
 }
 
 type budgetSnapshot struct {
@@ -61,6 +62,17 @@ func snapshotBudget(tx *gorm.DB, userID, categoryID uuid.UUID, date time.Time) (
 
 func (a *Alerter) BalanceChanges(userID uuid.UUID, changes []balanceChange) {
 	for _, c := range changes {
+		if c.After > c.Before {
+			achieved, err := a.goalRepo.MarkAchieved(c.Wallet.ID, c.After, time.Now())
+			if err == nil {
+				for _, g := range achieved {
+					_ = a.notif.CreateSystem(userID,
+						"Target Tabungan Tercapai 🎉",
+						fmt.Sprintf("Target \"%s\" sebesar Rp %.0f sudah tercapai di dompet \"%s\".", g.Name, g.TargetAmount, c.Wallet.Name),
+					)
+				}
+			}
+		}
 		if c.Wallet.AllowsNegative() {
 			continue
 		}

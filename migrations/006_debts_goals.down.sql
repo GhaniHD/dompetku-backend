@@ -1,0 +1,7 @@
+BEGIN;
+
+DROP TABLE IF EXISTS goals;
+DROP TABLE IF EXISTS debt_movements;
+DROP TABLE IF EXISTS debts;
+
+COMMIT;

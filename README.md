@@ -26,7 +26,20 @@ PostgreSQL**, memakai **Uber FX** untuk dependency injection antar layer
 - **Notifikasi** in-app dengan pagination. Notifikasi sistem hanya dikirim saat
   ambang baru terlewati: saldo turun di bawah Rp50.000 (kecuali kartu kredit),
   pengeluaran kategori mencapai 80% / 100% anggaran, serta transaksi besar.
-- **Laporan** bulanan & tahunan.
+- **Laporan** bulanan & tahunan. Laporan bulanan bisa per bulan kalender atau
+  mengikuti siklus gajian (`period=cycle`).
+- **Riwayat per dompet** seperti mutasi rekening: transaksi, transfer, dan
+  penyesuaian dalam satu timeline beserta saldo setelah setiap entri.
+- **Export CSV** transaksi dan transfer (UTF-8 dengan BOM, langsung terbuka di Excel).
+- **Transaksi berulang** mingguan/bulanan (gaji, kos, langganan, cicilan). Penjadwal
+  berjalan saat server start lalu setiap jam, mencatat jadwal yang terlewat, dan aman
+  dijalankan di beberapa server sekaligus. Jika saldo tidak cukup, jadwal tetap maju
+  dan user mendapat notifikasi.
+- **Hutang & piutang** dengan pembayaran sebagian, pengingat H-1 dan hari H jatuh
+  tempo. Pergerakannya mengubah saldo dompet tetapi tidak masuk laporan
+  pemasukan/pengeluaran.
+- **Target tabungan** yang terhubung ke satu dompet: progres, sisa, estimasi
+  setoran per bulan sampai tenggat, dan notifikasi saat target tercapai.
 - **Analisis keuangan berbasis AI** — mengirim ringkasan 6 bulan terakhir ke
   **Claude API** (`pkg/claude/client.go`) untuk insight dan prediksi 3 bulan.
   Hasil di-cache 24 jam selama datanya tidak berubah; tanpa `CLAUDE_API_KEY`
@@ -142,6 +155,7 @@ butuh header `Authorization: Bearer <token>`.
 | DELETE | `/api/wallets/:id` | Hapus wallet tanpa riwayat; wallet dengan riwayat diarsipkan (saldo wajib 0) |
 | POST | `/api/wallets/:id/adjust` | Penyesuaian saldo. Body: `actual_balance`, `note`, `date` (opsional) |
 | GET | `/api/wallets/:id/adjustments` | Riwayat penyesuaian saldo |
+| GET | `/api/wallets/:id/history?start_date=&end_date=&page=&limit=` | Mutasi dompet + `balance_after` per entri (terbaru dulu) |
 
 ### Transaksi
 | Method | Endpoint | Keterangan |
@@ -192,8 +206,43 @@ butuh header `Authorization: Bearer <token>`.
 ### Laporan
 | Method | Endpoint | Keterangan |
 | --- | --- | --- |
-| GET | `/api/reports?month=&year=` | Laporan bulanan |
+| GET | `/api/reports?month=&year=&period=calendar\|cycle` | Laporan bulanan, beserta `period_start` / `period_end` |
 | GET | `/api/reports/yearly?year=` | Laporan tahunan |
+
+### Transaksi Berulang
+| Method | Endpoint | Keterangan |
+| --- | --- | --- |
+| POST | `/api/recurring` | Body: `wallet_id`, `category_id`, `type`, `amount`, `note`, `frequency` (`weekly`/`monthly`), `start_date`, `end_date` (opsional) |
+| GET | `/api/recurring` | List jadwal beserta `next_run_date` dan `last_error` |
+| GET | `/api/recurring/:id` | Detail jadwal |
+| PUT | `/api/recurring/:id` | Ubah `wallet_id`, `category_id`, `amount`, `note`, `end_date`, `is_active` (jeda/lanjut) |
+| DELETE | `/api/recurring/:id` | Hapus jadwal; transaksi yang sudah tercatat tetap ada |
+
+### Hutang & Piutang
+| Method | Endpoint | Keterangan |
+| --- | --- | --- |
+| POST | `/api/debts` | Body: `kind` (`payable` = hutang, `receivable` = piutang), `counterparty`, `amount`, `wallet_id` (opsional), `date`, `due_date`, `note` |
+| GET | `/api/debts?kind=&status=open\|paid` | List + `total_payable` dan `total_receivable` (sisa yang belum lunas) |
+| GET | `/api/debts/:id` | Detail beserta riwayat pembayaran |
+| PUT | `/api/debts/:id` | Ubah `counterparty`, `note`, `due_date` |
+| DELETE | `/api/debts/:id` | Hapus dan kembalikan semua pergerakan saldo |
+| POST | `/api/debts/:id/payments` | Bayar/terima cicilan. Body: `amount`, `wallet_id` (opsional), `date`, `note` |
+| DELETE | `/api/debts/:id/payments/:paymentId` | Batalkan satu pembayaran |
+
+### Target Tabungan
+| Method | Endpoint | Keterangan |
+| --- | --- | --- |
+| POST | `/api/goals` | Body: `name`, `target_amount`, `wallet_id`, `deadline` (opsional) |
+| GET | `/api/goals` | List beserta `current_amount`, `progress_pct`, `monthly_needed` |
+| GET | `/api/goals/:id` | Detail target |
+| PUT | `/api/goals/:id` | Ubah `name`, `target_amount`, `deadline` |
+| DELETE | `/api/goals/:id` | Hapus target (dompet dan saldonya tidak berubah) |
+
+### Export
+| Method | Endpoint | Keterangan |
+| --- | --- | --- |
+| GET | `/api/export/transactions.csv?start_date=&end_date=` | Unduh transaksi (urut kronologis) |
+| GET | `/api/export/transfers.csv?start_date=&end_date=` | Unduh transfer |
 
 ### Analisis (AI)
 | Method | Endpoint | Keterangan |
@@ -228,9 +277,11 @@ lewat SQL Editor Supabase) **sebelum** kode yang membutuhkannya di-deploy.
 | `002_create_transfers.up.sql` | Tabel `transfers` |
 | `003_wallet_types_adjustments.up.sql` | Kolom `wallets.type`, `wallets.is_archived`, tabel `balance_adjustments` |
 | `004_budget_cycle.up.sql` | Kolom `users.budget_start_day` (default 1 = bulan kalender) |
+| `005_recurring_transactions.up.sql` | Tabel `recurring_transactions`, kolom `transactions.recurring_id` |
+| `006_debts_goals.up.sql` | Tabel `debts`, `debt_movements`, `goals` |
 | `check_balance.sql` | Cek konsistensi saldo (hanya membaca). Hasil 0 baris = semua saldo cocok |
 
-Invarian yang dijaga: `balance = opening_balance + Σ income − Σ expense + Σ transfer masuk − Σ transfer keluar + Σ penyesuaian`.
+Invarian yang dijaga: `balance = opening_balance + Σ income − Σ expense + Σ transfer masuk − Σ transfer keluar + Σ penyesuaian + Σ pergerakan hutang/piutang`.
 
 ## Testing
 

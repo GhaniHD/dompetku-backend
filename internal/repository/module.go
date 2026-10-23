@@ -14,4 +14,8 @@ var Module = fx.Module("repository",
 	fx.Provide(NewAnalysisRepository),
 	fx.Provide(NewTransferRepository),
 	fx.Provide(NewAdjustmentRepository),
+	fx.Provide(NewHistoryRepository),
+	fx.Provide(NewRecurringRepository),
+	fx.Provide(NewDebtRepository),
+	fx.Provide(NewGoalRepository),
 )
