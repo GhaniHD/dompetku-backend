@@ -42,22 +42,29 @@ type BudgetResponse struct {
 	Year  int       `json:"year"`
 	Notes string    `json:"notes"`
 
+	// Rentang periode sesuai siklus user, format YYYY-MM-DD, keduanya inklusif.
+	PeriodStart string `json:"period_start"`
+	PeriodEnd   string `json:"period_end"`
+
 	Category struct {
 		ID   uuid.UUID `json:"id"`
 		Name string    `json:"name"`
 	} `json:"category"`
 
-	Amount  float64 `json:"amount"`  // anggaran yang ditetapkan
-	Spent   float64 `json:"spent"`   // total pengeluaran aktual dari transaksi
-	Remain  float64 `json:"remain"`  // sisa anggaran (amount - spent)
+	Amount  float64 `json:"amount"`   // anggaran yang ditetapkan
+	Spent   float64 `json:"spent"`    // total pengeluaran aktual dari transaksi
+	Remain  float64 `json:"remain"`   // sisa anggaran (amount - spent)
 	UsedPct float64 `json:"used_pct"` // persentase penggunaan (0–100+)
-	Status  string  `json:"status"`  // "on_track" | "warning" | "over_budget"
+	Status  string  `json:"status"`   // "on_track" | "warning" | "over_budget"
 }
 
 // BudgetSummaryResponse adalah ringkasan semua anggaran dalam satu bulan/tahun
 type BudgetSummaryResponse struct {
 	Month       int              `json:"month"`
 	Year        int              `json:"year"`
+	PeriodStart string           `json:"period_start,omitempty"`
+	PeriodEnd   string           `json:"period_end,omitempty"`
+	StartDay    int              `json:"budget_start_day"`
 	TotalBudget float64          `json:"total_budget"`
 	TotalSpent  float64          `json:"total_spent"`
 	TotalRemain float64          `json:"total_remain"`

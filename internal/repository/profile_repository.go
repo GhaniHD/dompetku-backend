@@ -19,6 +19,7 @@ type ProfileRepository interface {
 	UpdatePassword(ctx context.Context, id uuid.UUID, hashedPassword string) error
 	UpdateAvatar(ctx context.Context, id uuid.UUID, avatarURL string) (*model.User, error)
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
+	UpdateBudgetStartDay(ctx context.Context, id uuid.UUID, day int) error
 
 	// Statistik
 	SumWalletBalance(ctx context.Context, userID uuid.UUID) (float64, error)
@@ -134,4 +135,10 @@ func (r *profileRepository) EmailExistsExcept(ctx context.Context, email string,
 		Where("LOWER(email) = LOWER(?) AND id != ?", email, excludeID).
 		Count(&count).Error
 	return count > 0, err
+}
+func (r *profileRepository) UpdateBudgetStartDay(ctx context.Context, id uuid.UUID, day int) error {
+	return r.db.WithContext(ctx).
+		Model(&model.User{}).
+		Where("id = ?", id).
+		Update("budget_start_day", day).Error
 }

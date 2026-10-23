@@ -2,6 +2,7 @@ package repository
 
 import (
 	"dompetku/internal/model"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -16,9 +17,9 @@ type BudgetRepository interface {
 	Update(budget *model.Budget) error
 	Delete(id uuid.UUID, userID uuid.UUID) error
 
-	// GetSpentByCategory menjumlahkan pengeluaran aktual dari tabel transactions
-	// untuk category tertentu dalam rentang bulan & tahun
-	GetSpentByCategory(userID uuid.UUID, categoryID uuid.UUID, month, year int) (float64, error)
+	// GetSpentByCategory menjumlahkan pengeluaran kategori dalam rentang [start, end),
+	// yaitu periode budget sesuai tanggal mulai siklus user.
+	GetSpentByCategory(userID uuid.UUID, categoryID uuid.UUID, start, end time.Time) (float64, error)
 }
 
 type budgetRepository struct {
@@ -83,9 +84,7 @@ func (r *budgetRepository) Delete(id uuid.UUID, userID uuid.UUID) error {
 		Delete(&model.Budget{}).Error
 }
 
-// GetSpentByCategory menjumlahkan kolom amount dari tabel transactions
-// yang bertipe "expense", sesuai category & rentang bulan-tahun
-func (r *budgetRepository) GetSpentByCategory(userID uuid.UUID, categoryID uuid.UUID, month, year int) (float64, error) {
+func (r *budgetRepository) GetSpentByCategory(userID uuid.UUID, categoryID uuid.UUID, start, end time.Time) (float64, error) {
 	var total float64
 
 	err := r.db.
@@ -94,10 +93,10 @@ func (r *budgetRepository) GetSpentByCategory(userID uuid.UUID, categoryID uuid.
 		Where(`user_id = ?
 			AND category_id = ?
 			AND type = 'expense'
-			AND EXTRACT(MONTH FROM transaction_date) = ?
-			AND EXTRACT(YEAR  FROM transaction_date) = ?
+			AND transaction_date >= ?
+			AND transaction_date < ?
 			AND deleted_at IS NULL`,
-			userID, categoryID, month, year).
+			userID, categoryID, start.Format("2006-01-02"), end.Format("2006-01-02")).
 		Scan(&total).Error
 
 	return total, err

@@ -19,8 +19,10 @@ PostgreSQL**, memakai **Uber FX** untuk dependency injection antar layer
   Transfer tidak dihitung sebagai pemasukan/pengeluaran; biaya admin dicatat
   sebagai pengeluaran kategori "Biaya Admin".
 - **Kategori** custom per user (tipe `income`/`expense`).
-- **Budget** bulanan per kategori, termasuk fitur **copy budget** (duplikasi
-  budget bulan sebelumnya ke bulan berjalan).
+- **Budget** bulanan per kategori, termasuk fitur **copy budget**. Periode budget
+  mengikuti **tanggal gajian** user (`budget_start_day`, 1–31): dengan tanggal 25,
+  budget "Oktober" mencakup 25 Okt – 24 Nov. Tanggal 29–31 pada bulan yang lebih
+  pendek dipindah ke hari terakhir bulan itu.
 - **Notifikasi** in-app dengan pagination. Notifikasi sistem hanya dikirim saat
   ambang baru terlewati: saldo turun di bawah Rp50.000 (kecuali kartu kredit),
   pengeluaran kategori mencapai 80% / 100% anggaran, serta transaksi besar.
@@ -127,6 +129,7 @@ butuh header `Authorization: Bearer <token>`.
 | PUT | `/api/profile/password` | Ganti password |
 | POST | `/api/profile/avatar` | Upload avatar |
 | DELETE | `/api/profile` | Hapus akun |
+| PUT | `/api/profile/budget-cycle` | Atur tanggal mulai siklus budget. Body: `start_day` (1–31) |
 
 ### Wallet
 | Method | Endpoint | Keterangan |
@@ -170,7 +173,8 @@ butuh header `Authorization: Bearer <token>`.
 | Method | Endpoint | Keterangan |
 | --- | --- | --- |
 | POST | `/api/budgets` | Buat budget |
-| GET | `/api/budgets` | List budget |
+| GET | `/api/budgets?month=&year=` | List budget beserta `period_start` / `period_end` sesuai siklus |
+| GET | `/api/budgets/current` | Budget periode yang sedang berjalan sesuai tanggal gajian |
 | GET | `/api/budgets/:id` | Detail budget |
 | PUT | `/api/budgets/:id` | Update budget |
 | DELETE | `/api/budgets/:id` | Hapus budget |
@@ -200,7 +204,7 @@ butuh header `Authorization: Bearer <token>`.
 
 Semua entity pakai `uuid` sebagai primary key dan soft-delete (`gorm.DeletedAt`):
 
-- **User**: `name`, `email` (unik), `password` (hash), `avatar_url`.
+- **User**: `name`, `email` (unik), `password` (hash), `avatar_url`, `budget_start_day`.
 - **Wallet**: `user_id`, `name`, `type`, `balance`, `opening_balance`, `is_archived`.
 - **Category**: `user_id`, `name`, `type` (`income`/`expense`).
 - **Transaction**: `user_id`, `wallet_id`, `category_id`, `amount`, `type`,
@@ -223,6 +227,7 @@ lewat SQL Editor Supabase) **sebelum** kode yang membutuhkannya di-deploy.
 | `001_widen_money_columns.up.sql` | Kolom uang jadi `numeric(18,2)`, tambah `wallets.opening_balance` |
 | `002_create_transfers.up.sql` | Tabel `transfers` |
 | `003_wallet_types_adjustments.up.sql` | Kolom `wallets.type`, `wallets.is_archived`, tabel `balance_adjustments` |
+| `004_budget_cycle.up.sql` | Kolom `users.budget_start_day` (default 1 = bulan kalender) |
 | `check_balance.sql` | Cek konsistensi saldo (hanya membaca). Hasil 0 baris = semua saldo cocok |
 
 Invarian yang dijaga: `balance = opening_balance + Σ income − Σ expense + Σ transfer masuk − Σ transfer keluar + Σ penyesuaian`.

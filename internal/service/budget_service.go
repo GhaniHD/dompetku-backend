@@ -1,18 +1,24 @@
 package service
 
 import (
+	"context"
 	"dompetku/internal/dto"
 	"dompetku/internal/model"
 	"dompetku/internal/repository"
+	"dompetku/pkg/budgetcycle"
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type BudgetService interface {
+	// GetCurrentBudgets mengembalikan budget periode yang sedang berjalan sesuai
+	// tanggal mulai siklus user.
+	GetCurrentBudgets(userID uuid.UUID) (*dto.BudgetSummaryResponse, error)
 	CreateBudget(userID uuid.UUID, req dto.CreateBudgetRequest) (*dto.BudgetResponse, error)
 	GetBudgetByID(userID uuid.UUID, id uuid.UUID) (*dto.BudgetResponse, error)
 	GetAllBudgets(userID uuid.UUID, filter dto.BudgetFilterRequest) (*dto.BudgetSummaryResponse, error)
@@ -24,19 +30,48 @@ type BudgetService interface {
 type budgetService struct {
 	budgetRepo   repository.BudgetRepository
 	categoryRepo repository.CategoryRepository
+	userRepo     repository.UserRepository
 	notifSvc     NotificationService
+	now          func() time.Time
 }
 
 func NewBudgetService(
 	budgetRepo repository.BudgetRepository,
 	categoryRepo repository.CategoryRepository,
+	userRepo repository.UserRepository,
 	notifSvc NotificationService,
 ) BudgetService {
 	return &budgetService{
 		budgetRepo:   budgetRepo,
 		categoryRepo: categoryRepo,
+		userRepo:     userRepo,
 		notifSvc:     notifSvc,
+		now:          time.Now,
 	}
+}
+
+var jakarta = func() *time.Location {
+	if loc, err := time.LoadLocation("Asia/Jakarta"); err == nil {
+		return loc
+	}
+	return time.FixedZone("WIB", 7*60*60)
+}()
+
+func (s *budgetService) startDay(userID uuid.UUID) (int, error) {
+	day, err := s.userRepo.BudgetStartDay(context.Background(), userID)
+	if err != nil {
+		return 0, err
+	}
+	return budgetcycle.Normalize(day), nil
+}
+
+func (s *budgetService) GetCurrentBudgets(userID uuid.UUID) (*dto.BudgetSummaryResponse, error) {
+	day, err := s.startDay(userID)
+	if err != nil {
+		return nil, err
+	}
+	year, month := budgetcycle.PeriodOf(day, s.now().In(jakarta))
+	return s.GetAllBudgets(userID, dto.BudgetFilterRequest{Month: month, Year: year})
 }
 
 // ─── CreateBudget ─────────────────────────────────────────────────────────────
@@ -110,6 +145,11 @@ func (s *budgetService) GetBudgetByID(userID uuid.UUID, id uuid.UUID) (*dto.Budg
 // ─── GetAllBudgets ────────────────────────────────────────────────────────────
 
 func (s *budgetService) GetAllBudgets(userID uuid.UUID, filter dto.BudgetFilterRequest) (*dto.BudgetSummaryResponse, error) {
+	day, err := s.startDay(userID)
+	if err != nil {
+		return nil, err
+	}
+
 	budgets, err := s.budgetRepo.FindAll(userID, filter.Month, filter.Year)
 	if err != nil {
 		return nil, err
@@ -122,7 +162,7 @@ func (s *budgetService) GetAllBudgets(userID uuid.UUID, filter dto.BudgetFilterR
 	)
 
 	for _, b := range budgets {
-		item, err := s.toBudgetResponse(userID, &b)
+		item, err := s.buildBudgetResponse(userID, &b, day)
 		if err != nil {
 			return nil, err
 		}
@@ -138,10 +178,14 @@ func (s *budgetService) GetAllBudgets(userID uuid.UUID, filter dto.BudgetFilterR
 	summary := &dto.BudgetSummaryResponse{
 		Month:       filter.Month,
 		Year:        filter.Year,
+		StartDay:    day,
 		TotalBudget: totalBudget,
 		TotalSpent:  totalSpent,
 		TotalRemain: totalBudget - totalSpent,
 		Budgets:     items,
+	}
+	if filter.Month > 0 && filter.Year > 0 {
+		summary.PeriodStart, summary.PeriodEnd = periodLabels(day, filter.Year, filter.Month)
 	}
 
 	return summary, nil
@@ -275,8 +319,22 @@ func (s *budgetService) CopyBudget(userID uuid.UUID, req dto.CopyBudgetRequest) 
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
+func periodLabels(startDay, year, month int) (string, string) {
+	start, end := budgetcycle.Period(startDay, year, month)
+	return start.Format("2006-01-02"), end.AddDate(0, 0, -1).Format("2006-01-02")
+}
+
 func (s *budgetService) toBudgetResponse(userID uuid.UUID, b *model.Budget) (*dto.BudgetResponse, error) {
-	spent, err := s.budgetRepo.GetSpentByCategory(userID, b.CategoryID, b.Month, b.Year)
+	day, err := s.startDay(userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildBudgetResponse(userID, b, day)
+}
+
+func (s *budgetService) buildBudgetResponse(userID uuid.UUID, b *model.Budget, startDay int) (*dto.BudgetResponse, error) {
+	start, end := budgetcycle.Period(startDay, b.Year, b.Month)
+	spent, err := s.budgetRepo.GetSpentByCategory(userID, b.CategoryID, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -307,6 +365,7 @@ func (s *budgetService) toBudgetResponse(userID uuid.UUID, b *model.Budget) (*dt
 	}
 	resp.Category.ID = b.Category.ID
 	resp.Category.Name = b.Category.Name
+	resp.PeriodStart, resp.PeriodEnd = periodLabels(startDay, b.Year, b.Month)
 
 	return resp, nil
 }
