@@ -26,11 +26,6 @@ func NewAppConf() (*AppConf, error) {
 		log.Println("[config] .env not found, using OS env:", err)
 	}
 
-	// Debug: print semua env variable
-	log.Println("DB_HOST:", os.Getenv("DB_HOST"))
-	log.Println("DB_PASSWORD:", os.Getenv("DB_PASSWORD"))
-	log.Println("DB_USER:", os.Getenv("DB_USER"))
-
 	return &AppConf{
 		DBHost:     getEnv("DB_HOST", "db"),
 		DBPort:     getEnv("DB_PORT", "5432"),
