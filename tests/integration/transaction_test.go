@@ -53,7 +53,7 @@ func TestCreateTransactionValidation(t *testing.T) {
 func TestUpdateTransactionMovesWallet(t *testing.T) {
 	u := newUser(t)
 	gopay := createWallet(t, u, "Gopay", 100000)
-	cash := createWallet(t, u, "Cash", 0)
+	cash := createWallet(t, u, "Cash", 50000)
 	food := createCategory(t, u, "Makan", "expense")
 	snack := createCategory(t, u, "Jajan", "expense")
 	tx := createTransaction(t, u, gopay, food, 20000, "expense")
@@ -72,7 +72,7 @@ func TestUpdateTransactionMovesWallet(t *testing.T) {
 	}
 
 	expectBalance(t, u, gopay, 100000)
-	expectBalance(t, u, cash, -20000)
+	expectBalance(t, u, cash, 30000)
 	expectReconciled(t, u)
 }
 

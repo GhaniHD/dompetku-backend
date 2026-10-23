@@ -18,11 +18,12 @@ type WalletRepository interface {
 	// mengembalikan wallet yang sudah soft-delete; cek DeletedAt di pemanggil.
 	// Wajib dipanggil di dalam db.Transaction.
 	FindByIDForUpdate(id uuid.UUID, userID uuid.UUID) (*model.Wallet, error)
-	FindAll(userID uuid.UUID) ([]model.Wallet, error)
+	FindAll(userID uuid.UUID, includeArchived bool) ([]model.Wallet, error)
 	Update(wallet *model.Wallet) error
 	Delete(id uuid.UUID, userID uuid.UUID) error
 	SumBalance(userID uuid.UUID) (float64, error)
 	AddBalance(walletID uuid.UUID, userID uuid.UUID, delta float64) error
+	HasHistory(walletID uuid.UUID) (bool, error)
 }
 
 type walletRepository struct {
@@ -67,12 +68,13 @@ func (r *walletRepository) FindByIDForUpdate(id uuid.UUID, userID uuid.UUID) (*m
 	return &wallet, nil
 }
 
-func (r *walletRepository) FindAll(userID uuid.UUID) ([]model.Wallet, error) {
+func (r *walletRepository) FindAll(userID uuid.UUID, includeArchived bool) ([]model.Wallet, error) {
 	var wallets []model.Wallet
-	err := r.db.
-		Where("user_id = ?", userID).
-		Order("created_at DESC").
-		Find(&wallets).Error
+	query := r.db.Where("user_id = ?", userID)
+	if !includeArchived {
+		query = query.Where("is_archived = false")
+	}
+	err := query.Order("is_archived ASC, created_at DESC").Find(&wallets).Error
 	return wallets, err
 }
 
@@ -116,4 +118,16 @@ func (r *walletRepository) AddBalance(walletID uuid.UUID, userID uuid.UUID, delt
 		return ErrWalletNotFound
 	}
 	return nil
+}
+
+// HasHistory bernilai true bila wallet pernah dipakai transaksi, transfer, atau
+// penyesuaian saldo; wallet seperti ini diarsipkan, bukan dihapus.
+func (r *walletRepository) HasHistory(walletID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.Raw(`SELECT
+		EXISTS (SELECT 1 FROM transactions WHERE wallet_id = ? AND deleted_at IS NULL)
+		OR EXISTS (SELECT 1 FROM transfers WHERE (from_wallet_id = ? OR to_wallet_id = ?) AND deleted_at IS NULL)
+		OR EXISTS (SELECT 1 FROM balance_adjustments WHERE wallet_id = ? AND deleted_at IS NULL)`,
+		walletID, walletID, walletID, walletID).Scan(&exists).Error
+	return exists, err
 }

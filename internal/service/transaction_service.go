@@ -6,7 +6,6 @@ import (
 	"dompetku/internal/repository"
 	"errors"
 	"fmt"
-	"sort"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -73,42 +72,16 @@ func ensureNotTransferFee(tx *gorm.DB, transactionID uuid.UUID) error {
 	return nil
 }
 
-// lockWallets mengunci wallet selalu dalam urutan ID yang sama agar dua request
-// yang menyentuh wallet yang sama tidak saling deadlock.
-func lockWallets(repo repository.WalletRepository, userID uuid.UUID, ids ...uuid.UUID) (map[uuid.UUID]*model.Wallet, error) {
-	unique := make([]uuid.UUID, 0, len(ids))
-	seen := make(map[uuid.UUID]bool, len(ids))
-	for _, id := range ids {
-		if !seen[id] {
-			seen[id] = true
-			unique = append(unique, id)
-		}
-	}
-	sort.Slice(unique, func(i, j int) bool { return unique[i].String() < unique[j].String() })
-
-	locked := make(map[uuid.UUID]*model.Wallet, len(unique))
-	for _, id := range unique {
-		wallet, err := repo.FindByIDForUpdate(id, userID)
-		if err != nil {
-			return nil, err
-		}
-		locked[id] = wallet
-	}
-	return locked, nil
-}
-
 func (s *transactionService) CreateTransaction(userID uuid.UUID, req dto.CreateTransactionRequest) (*dto.TransactionDetailResponse, error) {
 	var createdID uuid.UUID
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		walletRepo := repository.NewWalletRepository(tx)
-
-		wallets, err := lockWallets(walletRepo, userID, req.WalletID)
+		ledger, err := lockLedger(tx, userID, req.WalletID)
 		if err != nil {
 			return err
 		}
-		if wallets[req.WalletID].DeletedAt.Valid {
-			return ErrWalletNotFound
+		if err := ledger.requireUsable(req.WalletID); err != nil {
+			return err
 		}
 		if err := ensureCategory(tx, userID, req.CategoryID, req.Type); err != nil {
 			return err
@@ -128,7 +101,7 @@ func (s *transactionService) CreateTransaction(userID uuid.UUID, req dto.CreateT
 		}
 		createdID = transaction.ID
 
-		return walletRepo.AddBalance(req.WalletID, userID, deltaFromType(req.Type, req.Amount))
+		return ledger.apply(req.WalletID, deltaFromType(req.Type, req.Amount))
 	})
 	if err != nil {
 		return nil, err
@@ -202,7 +175,6 @@ func (s *transactionService) GetAllTransactions(userID uuid.UUID, filter dto.Tra
 func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, req dto.UpdateTransactionRequest) (*dto.TransactionDetailResponse, error) {
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		transactionRepo := repository.NewTransactionRepository(tx)
-		walletRepo := repository.NewWalletRepository(tx)
 
 		t, err := transactionRepo.FindByID(id, userID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -246,12 +218,9 @@ func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, r
 			}
 		}
 
-		wallets, err := lockWallets(walletRepo, userID, oldWalletID, t.WalletID)
+		ledger, err := lockLedger(tx, userID, oldWalletID, t.WalletID)
 		if err != nil {
 			return err
-		}
-		if t.WalletID != oldWalletID && wallets[t.WalletID].DeletedAt.Valid {
-			return ErrWalletNotFound
 		}
 
 		if err := transactionRepo.Update(t); err != nil {
@@ -261,16 +230,23 @@ func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, r
 		newDelta := deltaFromType(t.Type, t.Amount)
 
 		if oldWalletID == t.WalletID {
-			if diff := newDelta - oldDelta; diff != 0 {
-				return walletRepo.AddBalance(t.WalletID, userID, diff)
+			diff := newDelta - oldDelta
+			if diff == 0 {
+				return nil
 			}
-			return nil
+			if err := ledger.requireUsable(t.WalletID); err != nil {
+				return err
+			}
+			return ledger.apply(t.WalletID, diff)
 		}
 
-		if err := walletRepo.AddBalance(oldWalletID, userID, -oldDelta); err != nil {
+		if err := ledger.requireUsable(oldWalletID, t.WalletID); err != nil {
 			return err
 		}
-		return walletRepo.AddBalance(t.WalletID, userID, newDelta)
+		if err := ledger.apply(oldWalletID, -oldDelta); err != nil {
+			return err
+		}
+		return ledger.apply(t.WalletID, newDelta)
 	})
 	if err != nil {
 		return nil, err
@@ -286,7 +262,6 @@ func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, r
 func (s *transactionService) DeleteTransaction(userID uuid.UUID, id uuid.UUID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		transactionRepo := repository.NewTransactionRepository(tx)
-		walletRepo := repository.NewWalletRepository(tx)
 
 		t, err := transactionRepo.FindByID(id, userID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -299,14 +274,18 @@ func (s *transactionService) DeleteTransaction(userID uuid.UUID, id uuid.UUID) e
 			return err
 		}
 
-		if _, err := lockWallets(walletRepo, userID, t.WalletID); err != nil {
+		ledger, err := lockLedger(tx, userID, t.WalletID)
+		if err != nil {
+			return err
+		}
+		if err := ledger.requireUsable(t.WalletID); err != nil {
 			return err
 		}
 		if err := transactionRepo.Delete(id, userID); err != nil {
 			return err
 		}
 
-		return walletRepo.AddBalance(t.WalletID, userID, -deltaFromType(t.Type, t.Amount))
+		return ledger.apply(t.WalletID, -deltaFromType(t.Type, t.Amount))
 	})
 }
 

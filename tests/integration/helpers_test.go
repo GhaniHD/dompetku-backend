@@ -139,7 +139,12 @@ func newUser(t *testing.T) testUser {
 
 func createWallet(t *testing.T, u testUser, name string, balance float64) string {
 	t.Helper()
-	status, r := call(t, http.MethodPost, "/api/wallets", u.Token, map[string]any{"name": name, "balance": balance})
+	return createTypedWallet(t, u, name, "cash", balance)
+}
+
+func createTypedWallet(t *testing.T, u testUser, name, kind string, balance float64) string {
+	t.Helper()
+	status, r := call(t, http.MethodPost, "/api/wallets", u.Token, map[string]any{"name": name, "type": kind, "balance": balance})
 	expectStatus(t, status, http.StatusCreated, r)
 	return decode[idResponse](t, r).ID
 }
@@ -191,7 +196,7 @@ func countRows(t *testing.T, query string, args ...any) int64 {
 }
 
 // expectReconciled memastikan invarian utama untuk semua dompet milik user:
-// balance = opening_balance + Σ transaksi + Σ transfer masuk − Σ transfer keluar.
+// balance = opening_balance + Σ transaksi + Σ transfer masuk − Σ transfer keluar + Σ penyesuaian.
 func expectReconciled(t *testing.T, u testUser) {
 	t.Helper()
 	n := countRows(t, `
@@ -200,7 +205,8 @@ func expectReconciled(t *testing.T, u testUser) {
 			+ COALESCE((SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END)
 			            FROM transactions t WHERE t.wallet_id = w.id AND t.deleted_at IS NULL), 0)
 			+ COALESCE((SELECT SUM(x.amount) FROM transfers x WHERE x.to_wallet_id = w.id AND x.deleted_at IS NULL), 0)
-			- COALESCE((SELECT SUM(x.amount) FROM transfers x WHERE x.from_wallet_id = w.id AND x.deleted_at IS NULL), 0)`,
+			- COALESCE((SELECT SUM(x.amount) FROM transfers x WHERE x.from_wallet_id = w.id AND x.deleted_at IS NULL), 0)
+			+ COALESCE((SELECT SUM(a.amount) FROM balance_adjustments a WHERE a.wallet_id = w.id AND a.deleted_at IS NULL), 0)`,
 		u.ID)
 	if n != 0 {
 		t.Fatalf("%d dompet saldonya tidak cocok dengan riwayat transaksi/transfer", n)

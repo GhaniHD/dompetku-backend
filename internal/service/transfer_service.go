@@ -45,19 +45,14 @@ func (s *transferService) Create(userID uuid.UUID, req dto.CreateTransferRequest
 	var createdID uuid.UUID
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		walletRepo := repository.NewWalletRepository(tx)
-
-		wallets, err := lockWallets(walletRepo, userID, req.FromWalletID, req.ToWalletID)
+		ledger, err := lockLedger(tx, userID, req.FromWalletID, req.ToWalletID)
 		if err != nil {
 			return err
 		}
-		from, to := wallets[req.FromWalletID], wallets[req.ToWalletID]
-		if from.DeletedAt.Valid || to.DeletedAt.Valid {
-			return ErrWalletNotFound
+		if err := ledger.requireUsable(req.FromWalletID, req.ToWalletID); err != nil {
+			return err
 		}
-		if from.Balance < req.Amount+req.Fee {
-			return ErrInsufficientBalance
-		}
+		from, to := ledger.wallet(req.FromWalletID), ledger.wallet(req.ToWalletID)
 
 		transfer := &model.Transfer{
 			UserID:       userID,
@@ -94,10 +89,10 @@ func (s *transferService) Create(userID uuid.UUID, req dto.CreateTransferRequest
 		}
 		createdID = transfer.ID
 
-		if err := walletRepo.AddBalance(req.FromWalletID, userID, -(req.Amount + req.Fee)); err != nil {
+		if err := ledger.apply(req.FromWalletID, -(req.Amount + req.Fee)); err != nil {
 			return err
 		}
-		return walletRepo.AddBalance(req.ToWalletID, userID, req.Amount)
+		return ledger.apply(req.ToWalletID, req.Amount)
 	})
 	if err != nil {
 		return nil, err
@@ -133,7 +128,6 @@ func (s *transferService) GetAll(userID uuid.UUID, filter dto.TransferFilterRequ
 func (s *transferService) Delete(userID uuid.UUID, id uuid.UUID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		transferRepo := repository.NewTransferRepository(tx)
-		walletRepo := repository.NewWalletRepository(tx)
 
 		transfer, err := transferRepo.FindByID(id, userID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -143,7 +137,11 @@ func (s *transferService) Delete(userID uuid.UUID, id uuid.UUID) error {
 			return err
 		}
 
-		if _, err := lockWallets(walletRepo, userID, transfer.FromWalletID, transfer.ToWalletID); err != nil {
+		ledger, err := lockLedger(tx, userID, transfer.FromWalletID, transfer.ToWalletID)
+		if err != nil {
+			return err
+		}
+		if err := ledger.requireUsable(transfer.FromWalletID, transfer.ToWalletID); err != nil {
 			return err
 		}
 
@@ -156,10 +154,10 @@ func (s *transferService) Delete(userID uuid.UUID, id uuid.UUID) error {
 			}
 		}
 
-		if err := walletRepo.AddBalance(transfer.FromWalletID, userID, transfer.Amount+transfer.Fee); err != nil {
+		if err := ledger.apply(transfer.FromWalletID, transfer.Amount+transfer.Fee); err != nil {
 			return err
 		}
-		return walletRepo.AddBalance(transfer.ToWalletID, userID, -transfer.Amount)
+		return ledger.apply(transfer.ToWalletID, -transfer.Amount)
 	})
 }
 

@@ -60,9 +60,14 @@ func serviceErrorResponse(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrCategoryTypeMismatch),
 		errors.Is(err, service.ErrBudgetCategoryNotExpense),
 		errors.Is(err, service.ErrTransferSameWallet),
-		errors.Is(err, service.ErrInsufficientBalance):
+		errors.Is(err, service.ErrInsufficientBalance),
+		errors.Is(err, service.ErrWalletArchived),
+		errors.Is(err, service.ErrNegativeOpeningBalance),
+		errors.Is(err, service.ErrWalletTypeNegative),
+		errors.Is(err, service.ErrAdjustmentNoChange):
 		errorResponse(c, http.StatusBadRequest, err.Error())
-	case errors.Is(err, service.ErrTransactionIsTransferFee):
+	case errors.Is(err, service.ErrTransactionIsTransferFee),
+		errors.Is(err, service.ErrWalletNotEmpty):
 		errorResponse(c, http.StatusConflict, err.Error())
 	default:
 		log.Printf("[%s %s] %v", c.Request.Method, c.FullPath(), err)

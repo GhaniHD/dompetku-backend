@@ -9,8 +9,11 @@ PostgreSQL**, memakai **Uber FX** untuk dependency injection antar layer
 ## Fitur
 
 - **Autentikasi**: register & login dengan JWT.
-- **Multi-wallet**: setiap user bisa punya beberapa dompet/rekening, lengkap
-  dengan endpoint total saldo gabungan.
+- **Multi-wallet** bertipe `cash`, `bank`, `ewallet`, `credit_card`, `savings`.
+  Hanya kartu kredit yang boleh bersaldo minus. Wallet yang punya riwayat
+  diarsipkan, bukan dihapus, sehingga laporan tetap utuh.
+- **Penyesuaian saldo**: mencocokkan saldo aplikasi dengan saldo asli tanpa
+  menimpa angka; selisihnya tercatat dan tidak masuk laporan.
 - **Transaksi income/expense** terhubung ke wallet & kategori tertentu.
 - **Transfer antar wallet** (misalnya Gopay → Cash) dengan biaya admin opsional.
   Transfer tidak dihitung sebagai pemasukan/pengeluaran; biaya admin dicatat
@@ -123,12 +126,14 @@ butuh header `Authorization: Bearer <token>`.
 ### Wallet
 | Method | Endpoint | Keterangan |
 | --- | --- | --- |
-| POST | `/api/wallets` | Buat wallet baru |
-| GET | `/api/wallets` | List wallet milik user |
+| POST | `/api/wallets` | Buat wallet. Body: `name`, `type` (default `cash`), `balance` |
+| GET | `/api/wallets?include_archived=true` | List wallet (arsip disembunyikan kecuali diminta) |
 | GET | `/api/wallets/total-balance` | Total saldo semua wallet |
 | GET | `/api/wallets/:id` | Detail wallet |
-| PUT | `/api/wallets/:id` | Update wallet |
-| DELETE | `/api/wallets/:id` | Hapus wallet |
+| PUT | `/api/wallets/:id` | Ubah `name`, `type`, `is_archived`. `balance` dicatat sebagai penyesuaian |
+| DELETE | `/api/wallets/:id` | Hapus wallet tanpa riwayat; wallet dengan riwayat diarsipkan (saldo wajib 0) |
+| POST | `/api/wallets/:id/adjust` | Penyesuaian saldo. Body: `actual_balance`, `note`, `date` (opsional) |
+| GET | `/api/wallets/:id/adjustments` | Riwayat penyesuaian saldo |
 
 ### Transaksi
 | Method | Endpoint | Keterangan |
@@ -191,7 +196,7 @@ butuh header `Authorization: Bearer <token>`.
 Semua entity pakai `uuid` sebagai primary key dan soft-delete (`gorm.DeletedAt`):
 
 - **User**: `name`, `email` (unik), `password` (hash), `avatar_url`.
-- **Wallet**: `user_id`, `name`, `balance`, `opening_balance`.
+- **Wallet**: `user_id`, `name`, `type`, `balance`, `opening_balance`, `is_archived`.
 - **Category**: `user_id`, `name`, `type` (`income`/`expense`).
 - **Transaction**: `user_id`, `wallet_id`, `category_id`, `amount`, `type`,
   `note`, `date`.
@@ -199,6 +204,8 @@ Semua entity pakai `uuid` sebagai primary key dan soft-delete (`gorm.DeletedAt`)
 - **Notification**: `user_id`, `title`, `message`, `read`.
 - **Transfer**: `user_id`, `from_wallet_id`, `to_wallet_id`, `amount`, `fee`,
   `fee_transaction_id`, `note`, `transfer_date`.
+- **BalanceAdjustment**: `user_id`, `wallet_id`, `amount` (selisih bertanda),
+  `previous_balance`, `new_balance`, `note`, `adjusted_at`.
 
 ## Migrasi Database
 
@@ -210,9 +217,10 @@ lewat SQL Editor Supabase) **sebelum** kode yang membutuhkannya di-deploy.
 | --- | --- |
 | `001_widen_money_columns.up.sql` | Kolom uang jadi `numeric(18,2)`, tambah `wallets.opening_balance` |
 | `002_create_transfers.up.sql` | Tabel `transfers` |
+| `003_wallet_types_adjustments.up.sql` | Kolom `wallets.type`, `wallets.is_archived`, tabel `balance_adjustments` |
 | `check_balance.sql` | Cek konsistensi saldo (hanya membaca). Hasil 0 baris = semua saldo cocok |
 
-Invarian yang dijaga: `balance = opening_balance + Σ income − Σ expense + Σ transfer masuk − Σ transfer keluar`.
+Invarian yang dijaga: `balance = opening_balance + Σ income − Σ expense + Σ transfer masuk − Σ transfer keluar + Σ penyesuaian`.
 
 ## Testing
 

@@ -1,0 +1,9 @@
+BEGIN;
+
+DROP TABLE IF EXISTS balance_adjustments;
+
+ALTER TABLE wallets DROP CONSTRAINT IF EXISTS wallets_type_check;
+ALTER TABLE wallets DROP COLUMN IF EXISTS is_archived;
+ALTER TABLE wallets DROP COLUMN IF EXISTS type;
+
+COMMIT;
