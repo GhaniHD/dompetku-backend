@@ -12,6 +12,9 @@ PostgreSQL**, memakai **Uber FX** untuk dependency injection antar layer
 - **Multi-wallet**: setiap user bisa punya beberapa dompet/rekening, lengkap
   dengan endpoint total saldo gabungan.
 - **Transaksi income/expense** terhubung ke wallet & kategori tertentu.
+- **Transfer antar wallet** (misalnya Gopay → Cash) dengan biaya admin opsional.
+  Transfer tidak dihitung sebagai pemasukan/pengeluaran; biaya admin dicatat
+  sebagai pengeluaran kategori "Biaya Admin".
 - **Kategori** custom per user (tipe `income`/`expense`).
 - **Budget** bulanan per kategori, termasuk fitur **copy budget** (duplikasi
   budget bulan sebelumnya ke bulan berjalan).
@@ -90,7 +93,7 @@ Health check: `GET /health` → `OK`.
 | `DB_PASSWORD` | Password database | `postgres` |
 | `DB_NAME` | Nama database | `dompetku` |
 | `DB_SSLMODE` | Mode SSL koneksi database | `disable` (di Docker Compose diset `require`) |
-| `JWT_SECRET` | Secret untuk sign JWT. **Wajib diganti di production.** | `your-secret-key` |
+| `JWT_SECRET` | Secret untuk sign JWT, minimal 32 karakter. Server menolak start kalau kurang. | - |
 | `PORT` / `SERVER_PORT` | Port HTTP server | `8090` |
 | `CLAUDE_API_KEY` | API key Anthropic untuk fitur analisis keuangan AI (`/api/analysis`) | - |
 
@@ -136,6 +139,14 @@ butuh header `Authorization: Bearer <token>`.
 | PUT | `/api/transactions/:id` | Update transaksi |
 | DELETE | `/api/transactions/:id` | Hapus transaksi |
 
+### Transfer
+| Method | Endpoint | Keterangan |
+| --- | --- | --- |
+| POST | `/api/transfers` | Pindah saldo antar wallet. Body: `from_wallet_id`, `to_wallet_id`, `amount`, `fee` (opsional), `note`, `date` |
+| GET | `/api/transfers?wallet_id=&start_date=&end_date=` | List transfer |
+| GET | `/api/transfers/:id` | Detail transfer |
+| DELETE | `/api/transfers/:id` | Hapus transfer, saldo dan biaya admin dikembalikan |
+
 ### Kategori
 | Method | Endpoint | Keterangan |
 | --- | --- | --- |
@@ -180,18 +191,54 @@ butuh header `Authorization: Bearer <token>`.
 Semua entity pakai `uuid` sebagai primary key dan soft-delete (`gorm.DeletedAt`):
 
 - **User**: `name`, `email` (unik), `password` (hash), `avatar_url`.
-- **Wallet**: `user_id`, `name`, `balance`.
+- **Wallet**: `user_id`, `name`, `balance`, `opening_balance`.
 - **Category**: `user_id`, `name`, `type` (`income`/`expense`).
 - **Transaction**: `user_id`, `wallet_id`, `category_id`, `amount`, `type`,
   `note`, `date`.
 - **Budget**: `user_id`, `category_id`, `amount`, `month`, `year`, `notes`.
 - **Notification**: `user_id`, `title`, `message`, `read`.
+- **Transfer**: `user_id`, `from_wallet_id`, `to_wallet_id`, `amount`, `fee`,
+  `fee_transaction_id`, `note`, `transfer_date`.
+
+## Migrasi Database
+
+`AutoMigrate` hanya dipakai untuk tabel awal. Perubahan skema berikutnya ada di
+folder `migrations/` dan **wajib dijalankan berurutan** di database (misalnya
+lewat SQL Editor Supabase) **sebelum** kode yang membutuhkannya di-deploy.
+
+| File | Isi |
+| --- | --- |
+| `001_widen_money_columns.up.sql` | Kolom uang jadi `numeric(18,2)`, tambah `wallets.opening_balance` |
+| `002_create_transfers.up.sql` | Tabel `transfers` |
+| `check_balance.sql` | Cek konsistensi saldo (hanya membaca). Hasil 0 baris = semua saldo cocok |
+
+Invarian yang dijaga: `balance = opening_balance + Σ income − Σ expense + Σ transfer masuk − Σ transfer keluar`.
+
+## Testing
+
+Integration test di `tests/integration` menjalankan server sungguhan terhadap
+PostgreSQL. Database test **dikosongkan setiap kali test jalan**, jadi pakai
+database khusus yang namanya mengandung `test` (bukan salinan data penting).
+
+Windows (PowerShell), memakai PostgreSQL lokal:
+
+```powershell
+& "C:\Program Files\PostgreSQL\17\bin\createdb.exe" -U postgres -p 5433 -W dompetku_ci_test
+
+$env:TEST_DB_PORT = "5433"
+$env:TEST_DB_PASSWORD = "<password postgres lokal>"
+$env:TEST_DB_NAME = "dompetku_ci_test"
+go test -count=1 ./...
+```
+
+Linux/macOS: `make test TEST_DB_PASSWORD=...`. Tanpa `TEST_DB_NAME`, integration
+test otomatis dilewati.
+
+GitHub Actions (`.github/workflows/test.yml`) menjalankan build, `go vet`, dan
+semua test dengan PostgreSQL 17 di setiap push.
 
 ## Catatan
 
-- Migrasi skema database dilakukan lewat GORM auto-migrate (lihat
-  `pkg/db/database.go`) — tidak perlu tool migration terpisah.
-- `pkg/config/config.go` saat ini mencetak beberapa nilai environment
-  (`DB_HOST`, `DB_PASSWORD`, `DB_USER`) ke log sebagai debug — sebaiknya
-  dihapus atau dibungkus flag debug sebelum deploy ke production, supaya
-  kredensial tidak bocor ke log server.
+- File `.env` dan `*.dump` (backup database) ada di `.gitignore`.
+- Error internal dicatat di log server dengan format `[METHOD /path] pesan`;
+  client hanya menerima pesan umum supaya detail database tidak bocor.

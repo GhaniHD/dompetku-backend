@@ -13,5 +13,6 @@ services:
       - DB_NAME=${DB_NAME}
       - DB_SSLMODE=require
       - JWT_SECRET=${JWT_SECRET}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - SERVER_PORT=8090
    

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"dompetku/api"
-	"dompetku/internal/model"
 	"dompetku/internal/repository"
 	"dompetku/internal/service"
 	"dompetku/pkg/config"
@@ -16,17 +15,10 @@ import (
 	"gorm.io/gorm"
 )
 
-func MigrateDB(db *gorm.DB) error {
+func MigrateDB(gdb *gorm.DB) error {
 	log.Println("Menjalankan migrasi database...")
 
-	if err := db.AutoMigrate(
-		&model.User{},
-		&model.Category{},
-		&model.Transaction{},
-		&model.Wallet{},
-		&model.Budget{},
-		&model.Notification{},
-	); err != nil {
+	if err := db.AutoMigrate(gdb); err != nil {
 		return err
 	}
 
