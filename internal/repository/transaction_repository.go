@@ -59,11 +59,11 @@ func (r *transactionRepository) FindAll(userID uuid.UUID, filter dto.Transaction
 
 	query := withRelations(r.db, userID).Where("user_id = ?", userID)
 
-	if filter.WalletID != nil {
-		query = query.Where("wallet_id = ?", *filter.WalletID)
+	if filter.WalletID != "" {
+		query = query.Where("wallet_id = ?", filter.WalletID)
 	}
-	if filter.CategoryID != nil {
-		query = query.Where("category_id = ?", *filter.CategoryID)
+	if filter.CategoryID != "" {
+		query = query.Where("category_id = ?", filter.CategoryID)
 	}
 	if filter.Type != nil {
 		query = query.Where("type = ?", *filter.Type)

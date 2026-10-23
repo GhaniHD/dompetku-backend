@@ -8,6 +8,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type WalletService interface {
@@ -20,20 +21,22 @@ type WalletService interface {
 }
 
 type walletService struct {
+	db   *gorm.DB
 	repo repository.WalletRepository
 }
 
-func NewWalletService(repo repository.WalletRepository) WalletService {
-	return &walletService{repo: repo}
+func NewWalletService(db *gorm.DB, repo repository.WalletRepository) WalletService {
+	return &walletService{db: db, repo: repo}
 }
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
 func (s *walletService) Create(userID uuid.UUID, req dto.CreateWalletRequest) (*dto.WalletResponse, error) {
 	wallet := &model.Wallet{
-		UserID:  userID,
-		Name:    req.Name,
-		Balance: req.Balance,
+		UserID:         userID,
+		Name:           req.Name,
+		Balance:        req.Balance,
+		OpeningBalance: req.Balance,
 	}
 
 	if err := s.repo.Create(wallet); err != nil {
@@ -71,23 +74,43 @@ func (s *walletService) GetAll(userID uuid.UUID) ([]dto.WalletResponse, error) {
 // ─── Update ───────────────────────────────────────────────────────────────────
 
 func (s *walletService) Update(userID uuid.UUID, walletID uuid.UUID, req dto.UpdateWalletRequest) (*dto.WalletResponse, error) {
-	wallet, err := s.repo.FindByID(walletID, userID)
-	if err != nil {
+	var updated *model.Wallet
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		repo := repository.NewWalletRepository(tx)
+
+		wallet, err := repo.FindByIDForUpdate(walletID, userID)
+		if err != nil {
+			return err
+		}
+		if wallet.DeletedAt.Valid {
+			return repository.ErrWalletNotFound
+		}
+
+		if req.Name != nil {
+			wallet.Name = *req.Name
+		}
+		// Edit saldo langsung digeser ke opening_balance supaya invarian saldo tetap
+		// terjaga sampai fitur penyesuaian saldo tersedia.
+		if req.Balance != nil {
+			wallet.OpeningBalance += *req.Balance - wallet.Balance
+			wallet.Balance = *req.Balance
+		}
+
+		if err := repo.Update(wallet); err != nil {
+			return err
+		}
+		updated = wallet
+		return nil
+	})
+	if errors.Is(err, repository.ErrWalletNotFound) {
 		return nil, err
 	}
-
-	if req.Name != nil {
-		wallet.Name = *req.Name
-	}
-	if req.Balance != nil {
-		wallet.Balance = *req.Balance
-	}
-
-	if err := s.repo.Update(wallet); err != nil {
+	if err != nil {
 		return nil, errors.New("gagal memperbarui dompet")
 	}
 
-	return toWalletResponse(wallet), nil
+	return toWalletResponse(updated), nil
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────

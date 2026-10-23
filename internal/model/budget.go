@@ -11,7 +11,7 @@ type Budget struct {
 	ID         uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	UserID     uuid.UUID      `gorm:"type:uuid;not null" json:"users_id"`
 	CategoryID uuid.UUID      `gorm:"type:uuid;not null" json:"category_id"`
-	Amount     float64        `gorm:"type:decimal(10,2);not null" json:"amount"`
+	Amount     float64        `gorm:"type:numeric(18,2);not null" json:"amount"`
 	Month      int            `gorm:"type:int;not null" json:"month"`
 	Year       int            `gorm:"type:int;not null" json:"year"`
 	Notes      *string        `gorm:"type:text" json:"notes"`         // ← tambahkan ini

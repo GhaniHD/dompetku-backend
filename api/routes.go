@@ -32,6 +32,7 @@ func NewRouter(
 	notificationHandler *handler.NotificationHandler,
 	reportHandler *handler.ReportHandler,
 	analysisHandler *handler.AnalysisHandler,
+	transferHandler *handler.TransferHandler,
 	userRepo repository.UserRepository,
 	cfg *config.AppConf,
 ) *gin.Engine {
@@ -61,6 +62,7 @@ func NewRouter(
 		notificationHandler.RegisterRoutes(protected)
 		reportHandler.RegisterRoutes(protected)
 		analysisHandler.RegisterRoutes(protected)
+		transferHandler.RegisterRoutes(protected)
 	}
 
 	return r
