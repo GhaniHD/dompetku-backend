@@ -267,11 +267,12 @@ func (s *recurringService) processOne(today time.Time, ruleID *uuid.UUID) (bool,
 		if ruleID != nil {
 			q = q.Where("id = ?", *ruleID)
 		}
-		if err := q.Order("next_run_date ASC").First(&rule).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errNoDueRecurring
-			}
-			return err
+		res := q.Order("next_run_date ASC, id ASC").Limit(1).Find(&rule)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errNoDueRecurring
 		}
 
 		runDate = dateOnlyUTC(rule.NextRunDate)
