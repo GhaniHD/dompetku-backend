@@ -70,6 +70,7 @@ func serviceErrorResponse(c *gin.Context, err error) {
 		errors.Is(err, service.ErrNegativeOpeningBalance),
 		errors.Is(err, service.ErrWalletTypeNegative),
 		errors.Is(err, service.ErrAdjustmentNoChange),
+		errors.Is(err, service.ErrNoOpeningBalance),
 		errors.Is(err, service.ErrRecurringEndBeforeStart),
 		errors.Is(err, service.ErrDebtOverpaid):
 		errorResponse(c, http.StatusBadRequest, err.Error())

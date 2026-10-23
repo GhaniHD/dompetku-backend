@@ -1,10 +1,12 @@
 package service
 
 import (
+	"database/sql"
 	"dompetku/internal/dto"
 	"dompetku/internal/model"
 	"dompetku/internal/repository"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +24,9 @@ type WalletService interface {
 	Adjust(userID uuid.UUID, walletID uuid.UUID, req dto.AdjustBalanceRequest) (*dto.BalanceAdjustmentResponse, error)
 	ListAdjustments(userID uuid.UUID, walletID uuid.UUID) ([]dto.BalanceAdjustmentResponse, error)
 	History(userID uuid.UUID, walletID uuid.UUID, filter dto.WalletHistoryFilterRequest) (*dto.WalletHistoryResponse, error)
+	// OpeningToIncome memindahkan saldo awal menjadi transaksi pemasukan tanpa
+	// mengubah saldo, sehingga ikut terhitung di laporan dan ringkasan.
+	OpeningToIncome(userID uuid.UUID, walletID uuid.UUID, req dto.OpeningIncomeRequest) (*dto.WalletResponse, error)
 }
 
 type walletService struct {
@@ -299,4 +304,66 @@ func toAdjustmentResponse(a *model.BalanceAdjustment) *dto.BalanceAdjustmentResp
 		Date:            a.AdjustedAt,
 		CreatedAt:       a.CreatedAt,
 	}
+}
+
+func (s *walletService) OpeningToIncome(userID uuid.UUID, walletID uuid.UUID, req dto.OpeningIncomeRequest) (*dto.WalletResponse, error) {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		repo := repository.NewWalletRepository(tx)
+		wallet, err := repo.FindByIDForUpdate(walletID, userID)
+		if err != nil {
+			return err
+		}
+		if wallet.DeletedAt.Valid {
+			return ErrWalletNotFound
+		}
+		amount := wallet.OpeningBalance
+		if amount <= 0 {
+			return ErrNoOpeningBalance
+		}
+
+		// Tanggal pemasukan = saat dompet dibuat atau mutasi pertamanya, mana yang lebih
+		// awal, agar saldo berjalan di riwayat tidak pernah tampil minus.
+		date := wallet.CreatedAt.In(jakarta)
+		date = time.Date(date.Year(), date.Month(), date.Day(), 12, 0, 0, 0, jakarta)
+		var first sql.NullTime
+		if err := tx.Raw(`SELECT MIN(d) FROM (
+				SELECT MIN(transaction_date) AS d FROM transactions WHERE wallet_id = ? AND deleted_at IS NULL
+				UNION ALL SELECT MIN(transfer_date) FROM transfers WHERE (from_wallet_id = ? OR to_wallet_id = ?) AND deleted_at IS NULL
+				UNION ALL SELECT MIN(adjusted_at) FROM balance_adjustments WHERE wallet_id = ? AND deleted_at IS NULL
+				UNION ALL SELECT MIN(movement_date) FROM debt_movements WHERE wallet_id = ? AND deleted_at IS NULL
+			) x`, walletID, walletID, walletID, walletID, walletID).Scan(&first).Error; err != nil {
+			return err
+		}
+		if first.Valid {
+			f := time.Date(first.Time.Year(), first.Time.Month(), first.Time.Day(), 12, 0, 0, 0, jakarta)
+			if f.Before(date) {
+				date = f
+			}
+		}
+
+		note := strings.TrimSpace(req.Note)
+		if note == "" {
+			note = "Saldo awal " + wallet.Name
+		}
+		created, err := createTransactionTx(tx, userID, dto.CreateTransactionRequest{
+			WalletID: walletID, CategoryID: req.CategoryID, Amount: amount, Type: "income", Note: note, Date: date,
+		}, nil)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Transaction{}).Where("id = ?", created.ID).
+			UpdateColumn("created_at", wallet.CreatedAt).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.Wallet{}).
+			Where("id = ? AND user_id = ?", walletID, userID).
+			Updates(map[string]any{
+				"opening_balance": gorm.Expr("opening_balance - ?", amount),
+				"balance":         gorm.Expr("balance - ?", amount),
+			}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetByID(userID, walletID)
 }

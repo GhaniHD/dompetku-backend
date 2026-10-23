@@ -33,6 +33,7 @@ func (h *WalletHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		wallets.PUT("/:id", h.UpdateWallet)
 		wallets.DELETE("/:id", h.DeleteWallet)
 		wallets.POST("/:id/adjust", h.AdjustBalance)
+		wallets.POST("/:id/opening-income", h.OpeningToIncome)
 		wallets.GET("/:id/adjustments", h.ListAdjustments)
 		wallets.GET("/:id/history", h.History)
 	}
@@ -256,4 +257,31 @@ func (h *WalletHandler) History(c *gin.Context) {
 	}
 
 	successResponse(c, http.StatusOK, "riwayat dompet berhasil diambil", result)
+}
+
+// POST /api/wallets/:id/opening-income
+func (h *WalletHandler) OpeningToIncome(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+	id, ok := walletIDParam(c)
+	if !ok {
+		return
+	}
+
+	var req dto.OpeningIncomeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "pilih kategori pemasukan")
+		return
+	}
+
+	result, err := h.walletService.OpeningToIncome(userID, id, req)
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+
+	successResponse(c, http.StatusOK, "saldo awal dicatat sebagai pemasukan", result)
 }

@@ -21,6 +21,7 @@ var (
 	ErrWalletNotEmpty         = errors.New("saldo dompet harus 0 sebelum diarsipkan; pindahkan saldonya lewat transfer atau penyesuaian")
 	ErrNegativeOpeningBalance = errors.New("saldo awal hanya boleh minus untuk kartu kredit")
 	ErrWalletTypeNegative     = errors.New("dompet bersaldo minus hanya boleh bertipe kartu kredit; sesuaikan saldonya dulu")
+	ErrNoOpeningBalance       = errors.New("dompet ini tidak punya saldo awal positif untuk dicatat sebagai pemasukan")
 	ErrAdjustmentNoChange     = errors.New("saldo aktual sama dengan saldo tercatat, tidak ada yang disesuaikan")
 
 	ErrNotificationNotFound = errors.New("notifikasi tidak ditemukan")

@@ -25,6 +25,11 @@ type WalletFilterRequest struct {
 	IncludeArchived bool `form:"include_archived"`
 }
 
+type OpeningIncomeRequest struct {
+	CategoryID uuid.UUID `json:"category_id" binding:"required"`
+	Note       string    `json:"note"        binding:"max=500"`
+}
+
 type AdjustBalanceRequest struct {
 	ActualBalance *float64   `json:"actual_balance" binding:"required"`
 	Note          string     `json:"note"           binding:"max=500"`
