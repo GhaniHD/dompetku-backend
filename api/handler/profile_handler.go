@@ -41,7 +41,7 @@ func profileErrResponse(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrEmailAlreadyUsed):
 		errorResponse(c, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrWrongPassword):
-		errorResponse(c, http.StatusUnauthorized, err.Error())
+		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrInvalidFileType):
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrFileTooLarge):

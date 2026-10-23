@@ -102,3 +102,20 @@ func TestDeletedAccountCannotUseTokenOrReRegister(t *testing.T) {
 		t.Fatalf("error database bocor ke client: %q", r.Message)
 	}
 }
+
+func TestChangePasswordWrongOldPasswordIsBadRequest(t *testing.T) {
+	u := newUser(t)
+
+	status, r := call(t, http.MethodPut, "/api/profile/password", u.Token, map[string]any{
+		"old_password": "bukan-password-lama", "new_password": "rahasia456",
+	})
+	expectStatus(t, status, http.StatusBadRequest, r)
+
+	status, r = call(t, http.MethodPut, "/api/profile/password", u.Token, map[string]any{
+		"old_password": "rahasia123", "new_password": "rahasia456",
+	})
+	expectStatus(t, status, http.StatusOK, r)
+
+	status, r = call(t, http.MethodPost, "/api/auth/login", "", map[string]any{"email": u.Email, "password": "rahasia456"})
+	expectStatus(t, status, http.StatusOK, r)
+}

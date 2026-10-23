@@ -2,7 +2,9 @@ package handler
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,10 +18,11 @@ import (
 type ExportHandler struct {
 	transactionService service.TransactionService
 	transferService    service.TransferService
+	exportService      service.ExportService
 }
 
-func NewExportHandler(transactionService service.TransactionService, transferService service.TransferService) *ExportHandler {
-	return &ExportHandler{transactionService: transactionService, transferService: transferService}
+func NewExportHandler(transactionService service.TransactionService, transferService service.TransferService, exportService service.ExportService) *ExportHandler {
+	return &ExportHandler{transactionService: transactionService, transferService: transferService, exportService: exportService}
 }
 
 func (h *ExportHandler) RegisterRoutes(rg *gin.RouterGroup) {
@@ -27,6 +30,7 @@ func (h *ExportHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		export.GET("/transactions.csv", h.Transactions)
 		export.GET("/transfers.csv", h.Transfers)
+		export.GET("/report.xlsx", h.Report)
 	}
 }
 
@@ -129,4 +133,53 @@ func (h *ExportHandler) Transfers(c *gin.Context) {
 
 	writeCSV(c, exportFilename("transfer", filter),
 		[]string{"tanggal", "dari", "ke", "nominal", "biaya_admin", "catatan"}, rows)
+}
+
+// GET /api/export/report.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD
+// Tanpa parameter: periode gajian yang sedang berjalan.
+func (h *ExportHandler) Report(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+
+	parse := func(key string) (*time.Time, bool) {
+		v := c.Query(key)
+		if v == "" {
+			return nil, true
+		}
+		t, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			errorResponse(c, http.StatusBadRequest, "format tanggal "+key+" harus YYYY-MM-DD")
+			return nil, false
+		}
+		return &t, true
+	}
+	start, ok := parse("start")
+	if !ok {
+		return
+	}
+	end, ok := parse("end")
+	if !ok {
+		return
+	}
+
+	f, filename, err := h.exportService.Workbook(userID, start, end)
+	if err != nil {
+		if errors.Is(err, service.ErrExportRange) || errors.Is(err, service.ErrExportTooLarge) {
+			errorResponse(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		serviceErrorResponse(c, err)
+		return
+	}
+	defer f.Close()
+
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Status(http.StatusOK)
+	if _, err := f.WriteTo(c.Writer); err != nil {
+		log.Printf("[export xlsx] %v", err)
+	}
 }

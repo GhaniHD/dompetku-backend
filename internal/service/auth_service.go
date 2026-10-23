@@ -41,13 +41,13 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 	email := normalizeEmail(req.Email)
 
 	if name == "" || email == "" || req.Password == "" {
-		return nil, errors.New("all fields are required")
+		return nil, errors.New("nama, email, dan password wajib diisi")
 	}
 	if _, err := mail.ParseAddress(email); err != nil {
-		return nil, errors.New("invalid email format")
+		return nil, errors.New("format email tidak valid")
 	}
 	if len(req.Password) < minPasswordLength || len(req.Password) > 72 {
-		return nil, errors.New("password must be 8-72 characters")
+		return nil, errors.New("password harus 8 sampai 72 karakter")
 	}
 
 	taken, err := s.userRepo.EmailTaken(ctx, email)
@@ -55,7 +55,7 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 		return nil, err
 	}
 	if taken {
-		return nil, errors.New("email already registered")
+		return nil, errors.New("email sudah terdaftar")
 	}
 
 	hashedPassword, err := crypto.HashPassword(req.Password)
@@ -79,16 +79,16 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 func (s *authService) Login(ctx context.Context, req dto.LoginRequest) (*dto.AuthResponse, error) {
 	email := normalizeEmail(req.Email)
 	if email == "" || req.Password == "" {
-		return nil, errors.New("email and password are required")
+		return nil, errors.New("email dan password wajib diisi")
 	}
 
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil || user == nil {
-		return nil, errors.New("invalid email or password")
+		return nil, errors.New("email atau password salah")
 	}
 
 	if !crypto.CheckPasswordHash(req.Password, user.Password) {
-		return nil, errors.New("invalid email or password")
+		return nil, errors.New("email atau password salah")
 	}
 
 	return s.buildAuthResponse(user)

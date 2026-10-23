@@ -17,4 +17,5 @@ var Module = fx.Module("service",
 	fx.Provide(NewRecurringService),
 	fx.Provide(NewDebtService),
 	fx.Provide(NewGoalService),
+	fx.Provide(NewExportService),
 )
