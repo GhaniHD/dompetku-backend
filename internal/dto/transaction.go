@@ -55,8 +55,8 @@ type UpdateTransactionRequest struct {
 }
 
 type TransactionFilterRequest struct {
-	WalletID   *uuid.UUID `form:"wallet_id"`
-	CategoryID *uuid.UUID `form:"category_id"`
+	WalletID   string     `form:"wallet_id"   binding:"omitempty,uuid"`
+	CategoryID string     `form:"category_id" binding:"omitempty,uuid"`
 	Type       *string    `form:"type" binding:"omitempty,oneof=income expense"`
 	StartDate  *time.Time `form:"start_date"`
 	EndDate    *time.Time `form:"end_date"`

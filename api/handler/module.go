@@ -12,4 +12,5 @@ var Module = fx.Module("handler",
 	fx.Provide(NewBudgetHandler),
 	fx.Provide(NewReportHandler),
 	fx.Provide(NewAnalysisHandler),
+	fx.Provide(NewTransferHandler),
 )

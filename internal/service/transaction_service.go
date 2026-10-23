@@ -62,6 +62,17 @@ func ensureCategory(tx *gorm.DB, userID, categoryID uuid.UUID, txType string) er
 	return nil
 }
 
+func ensureNotTransferFee(tx *gorm.DB, transactionID uuid.UUID) error {
+	isFee, err := repository.NewTransferRepository(tx).IsFeeTransaction(transactionID)
+	if err != nil {
+		return err
+	}
+	if isFee {
+		return ErrTransactionIsTransferFee
+	}
+	return nil
+}
+
 // lockWallets mengunci wallet selalu dalam urutan ID yang sama agar dua request
 // yang menyentuh wallet yang sama tidak saling deadlock.
 func lockWallets(repo repository.WalletRepository, userID uuid.UUID, ids ...uuid.UUID) (map[uuid.UUID]*model.Wallet, error) {
@@ -200,6 +211,9 @@ func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, r
 		if err != nil {
 			return err
 		}
+		if err := ensureNotTransferFee(tx, id); err != nil {
+			return err
+		}
 
 		oldWalletID := t.WalletID
 		oldDelta := deltaFromType(t.Type, t.Amount)
@@ -279,6 +293,9 @@ func (s *transactionService) DeleteTransaction(userID uuid.UUID, id uuid.UUID) e
 			return ErrTransactionNotFound
 		}
 		if err != nil {
+			return err
+		}
+		if err := ensureNotTransferFee(tx, id); err != nil {
 			return err
 		}
 

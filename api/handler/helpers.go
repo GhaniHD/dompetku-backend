@@ -54,11 +54,16 @@ func serviceErrorResponse(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrTransactionNotFound),
 		errors.Is(err, service.ErrWalletNotFound),
-		errors.Is(err, service.ErrCategoryNotFound):
+		errors.Is(err, service.ErrCategoryNotFound),
+		errors.Is(err, service.ErrTransferNotFound):
 		errorResponse(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrCategoryTypeMismatch),
-		errors.Is(err, service.ErrBudgetCategoryNotExpense):
+		errors.Is(err, service.ErrBudgetCategoryNotExpense),
+		errors.Is(err, service.ErrTransferSameWallet),
+		errors.Is(err, service.ErrInsufficientBalance):
 		errorResponse(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrTransactionIsTransferFee):
+		errorResponse(c, http.StatusConflict, err.Error())
 	default:
 		log.Printf("[%s %s] %v", c.Request.Method, c.FullPath(), err)
 		errorResponse(c, http.StatusInternalServerError, "terjadi kesalahan internal")
