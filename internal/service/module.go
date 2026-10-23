@@ -13,4 +13,5 @@ var Module = fx.Module("service",
 	fx.Provide(NewReportService),
 	fx.Provide(NewAnalysisService),
 	fx.Provide(NewTransferService),
+	fx.Provide(NewAlerter),
 )

@@ -22,4 +22,6 @@ var (
 	ErrNegativeOpeningBalance = errors.New("saldo awal hanya boleh minus untuk kartu kredit")
 	ErrWalletTypeNegative     = errors.New("dompet bersaldo minus hanya boleh bertipe kartu kredit; sesuaikan saldonya dulu")
 	ErrAdjustmentNoChange     = errors.New("saldo aktual sama dengan saldo tercatat, tidak ada yang disesuaikan")
+
+	ErrNotificationNotFound = errors.New("notifikasi tidak ditemukan")
 )

@@ -21,11 +21,14 @@ PostgreSQL**, memakai **Uber FX** untuk dependency injection antar layer
 - **Kategori** custom per user (tipe `income`/`expense`).
 - **Budget** bulanan per kategori, termasuk fitur **copy budget** (duplikasi
   budget bulan sebelumnya ke bulan berjalan).
-- **Notifikasi** in-app (read/unread, mark all as read, hapus semua/satu).
+- **Notifikasi** in-app dengan pagination. Notifikasi sistem hanya dikirim saat
+  ambang baru terlewati: saldo turun di bawah Rp50.000 (kecuali kartu kredit),
+  pengeluaran kategori mencapai 80% / 100% anggaran, serta transaksi besar.
 - **Laporan** bulanan & tahunan.
-- **Analisis keuangan berbasis AI** — mengirim data keuangan user ke
-  **Claude API** (`pkg/claude/client.go`, model `claude-sonnet-4-20250514`)
-  untuk menghasilkan insight/analisis dalam bahasa natural.
+- **Analisis keuangan berbasis AI** — mengirim ringkasan 6 bulan terakhir ke
+  **Claude API** (`pkg/claude/client.go`) untuk insight dan prediksi 3 bulan.
+  Hasil di-cache 24 jam selama datanya tidak berubah; tanpa `CLAUDE_API_KEY`
+  endpoint tetap jalan dengan insight kosong.
 - **Profil**: update profil, ganti password, upload avatar, hapus akun.
 
 ## Tech Stack
@@ -99,6 +102,8 @@ Health check: `GET /health` → `OK`.
 | `JWT_SECRET` | Secret untuk sign JWT, minimal 32 karakter. Server menolak start kalau kurang. | - |
 | `PORT` / `SERVER_PORT` | Port HTTP server | `8090` |
 | `CLAUDE_API_KEY` | API key Anthropic untuk fitur analisis keuangan AI (`/api/analysis`) | - |
+| `CLAUDE_MODEL` | Model Claude yang dipakai analisis | `claude-sonnet-4-20250514` |
+| `CLAUDE_API_URL` | Endpoint Messages API (diganti hanya untuk test) | `https://api.anthropic.com/v1/messages` |
 
 > File `.env` sudah ada di `.gitignore`, jadi kredensial asli tidak ikut
 > ter-commit — cukup salin dari `.env.example` dan isi sendiri.
@@ -174,7 +179,7 @@ butuh header `Authorization: Bearer <token>`.
 ### Notifikasi
 | Method | Endpoint | Keterangan |
 | --- | --- | --- |
-| GET | `/api/notifications` | List notifikasi |
+| GET | `/api/notifications?page=1&limit=20` | List notifikasi (limit maks 100), beserta `total` dan `total_unread` |
 | PATCH | `/api/notifications/read-all` | Tandai semua terbaca |
 | PATCH | `/api/notifications/:id/read` | Tandai satu terbaca |
 | DELETE | `/api/notifications/clear` | Hapus semua notifikasi |

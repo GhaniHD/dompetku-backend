@@ -6,15 +6,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// ── Request ───────────────────────────────────────────────────────────
-
-type CreateNotificationRequest struct {
-	UserID  uuid.UUID `json:"users_id" binding:"required"`
-	Title   string    `json:"title"    binding:"required,max=100"`
-	Message string    `json:"message"  binding:"required,max=255"`
+type NotificationFilterRequest struct {
+	Page  int `form:"page"  binding:"omitempty,min=1"`
+	Limit int `form:"limit" binding:"omitempty,min=1,max=100"`
 }
-
-// ── Response ──────────────────────────────────────────────────────────
 
 type NotificationResponse struct {
 	ID        uuid.UUID `json:"id"`
@@ -28,4 +23,7 @@ type NotificationResponse struct {
 type NotificationListResponse struct {
 	Notifications []NotificationResponse `json:"notifications"`
 	TotalUnread   int64                  `json:"total_unread"`
+	Total         int64                  `json:"total"`
+	Page          int                    `json:"page"`
+	Limit         int                    `json:"limit"`
 }

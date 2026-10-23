@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"dompetku/internal/dto"
 	"dompetku/internal/service"
 	"net/http"
 
@@ -19,15 +20,15 @@ func NewNotificationHandler(svc service.NotificationService) *NotificationHandle
 func (h *NotificationHandler) RegisterRoutes(r *gin.RouterGroup) {
 	notif := r.Group("/notifications")
 	{
-		notif.GET("",             h.GetAll)
-		notif.PATCH("/read-all",  h.MarkAllAsRead)
-		notif.PATCH("/:id/read",  h.MarkAsRead)
-		notif.DELETE("/clear",    h.DeleteAll)
-		notif.DELETE("/:id",      h.Delete)
+		notif.GET("", h.GetAll)
+		notif.PATCH("/read-all", h.MarkAllAsRead)
+		notif.PATCH("/:id/read", h.MarkAsRead)
+		notif.DELETE("/clear", h.DeleteAll)
+		notif.DELETE("/:id", h.Delete)
 	}
 }
 
-// GET /api/notifications
+// GET /api/notifications?page=1&limit=20
 func (h *NotificationHandler) GetAll(c *gin.Context) {
 	userID, ok := getUserID(c)
 	if !ok {
@@ -35,9 +36,15 @@ func (h *NotificationHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.GetAll(userID)
+	var filter dto.NotificationFilterRequest
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		errorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.svc.GetAll(userID, filter)
 	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 
@@ -59,13 +66,7 @@ func (h *NotificationHandler) MarkAsRead(c *gin.Context) {
 	}
 
 	if err := h.svc.MarkAsRead(id, userID); err != nil {
-		status := http.StatusInternalServerError
-		if err.Error() == "notifikasi tidak ditemukan" {
-			status = http.StatusNotFound
-		} else if err.Error() == "akses ditolak" {
-			status = http.StatusForbidden
-		}
-		errorResponse(c, status, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 
@@ -81,7 +82,7 @@ func (h *NotificationHandler) MarkAllAsRead(c *gin.Context) {
 	}
 
 	if err := h.svc.MarkAllAsRead(userID); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 
@@ -103,13 +104,7 @@ func (h *NotificationHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.svc.Delete(id, userID); err != nil {
-		status := http.StatusInternalServerError
-		if err.Error() == "notifikasi tidak ditemukan" {
-			status = http.StatusNotFound
-		} else if err.Error() == "akses ditolak" {
-			status = http.StatusForbidden
-		}
-		errorResponse(c, status, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 
@@ -125,7 +120,7 @@ func (h *NotificationHandler) DeleteAll(c *gin.Context) {
 	}
 
 	if err := h.svc.DeleteAll(userID); err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 

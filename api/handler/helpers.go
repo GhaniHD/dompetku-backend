@@ -55,7 +55,8 @@ func serviceErrorResponse(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrTransactionNotFound),
 		errors.Is(err, service.ErrWalletNotFound),
 		errors.Is(err, service.ErrCategoryNotFound),
-		errors.Is(err, service.ErrTransferNotFound):
+		errors.Is(err, service.ErrTransferNotFound),
+		errors.Is(err, service.ErrNotificationNotFound):
 		errorResponse(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrCategoryTypeMismatch),
 		errors.Is(err, service.ErrBudgetCategoryNotExpense),

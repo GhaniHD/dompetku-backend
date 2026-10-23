@@ -1,32 +1,38 @@
-// pkg/claude/client.go
 package claude
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
-const (
-	apiURL    = "https://api.anthropic.com/v1/messages"
-	modelName = "claude-sonnet-4-20250514"
-)
+var ErrDisabled = errors.New("claude API key tidak diset")
 
 type Client struct {
 	apiKey     string
+	model      string
+	apiURL     string
 	httpClient *http.Client
 }
 
-func NewClient(apiKey string) *Client {
+func NewClient(apiKey, model, apiURL string) *Client {
 	return &Client{
 		apiKey: apiKey,
+		model:  model,
+		apiURL: apiURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+func (c *Client) Enabled() bool {
+	return c.apiKey != ""
 }
 
 type message struct {
@@ -53,23 +59,23 @@ type response struct {
 	} `json:"error"`
 }
 
-// Complete mengirim prompt ke Claude dan mengembalikan teks response.
+// Complete mengirim prompt ke Claude dan mengembalikan gabungan blok teks jawaban.
 func (c *Client) Complete(system, userPrompt string) (string, error) {
-	payload := request{
-		Model:     modelName,
-		MaxTokens: 1500,
-		System:    system,
-		Messages: []message{
-			{Role: "user", Content: userPrompt},
-		},
+	if !c.Enabled() {
+		return "", ErrDisabled
 	}
 
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(request{
+		Model:     c.model,
+		MaxTokens: 1500,
+		System:    system,
+		Messages:  []message{{Role: "user", Content: userPrompt}},
+	})
 	if err != nil {
 		return "", err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, c.apiURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -90,16 +96,23 @@ func (c *Client) Complete(system, userPrompt string) (string, error) {
 
 	var result response
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return "", err
+		return "", fmt.Errorf("claude API status %d: respons bukan JSON", resp.StatusCode)
 	}
-
 	if result.Error != nil {
-		return "", fmt.Errorf("claude API error: %s", result.Error.Message)
+		return "", fmt.Errorf("claude API status %d: %s", resp.StatusCode, result.Error.Message)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("claude API status %d", resp.StatusCode)
 	}
 
-	if len(result.Content) == 0 {
-		return "", fmt.Errorf("claude API: empty response")
+	var text strings.Builder
+	for _, block := range result.Content {
+		if block.Type == "text" {
+			text.WriteString(block.Text)
+		}
 	}
-
-	return result.Content[0].Text, nil
+	if text.Len() == 0 {
+		return "", errors.New("claude API: respons kosong")
+	}
+	return text.String(), nil
 }

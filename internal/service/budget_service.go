@@ -144,18 +144,6 @@ func (s *budgetService) GetAllBudgets(userID uuid.UUID, filter dto.BudgetFilterR
 		Budgets:     items,
 	}
 
-	// ── Notifikasi: total pengeluaran > 90% dari total anggaran bulan ini ──
-	if totalBudget > 0 {
-		overallPct := (totalSpent / totalBudget) * 100
-		if overallPct >= 90 {
-			_ = s.notifSvc.CreateSystem(userID,
-				"Peringatan Anggaran Bulanan ⚠️",
-				fmt.Sprintf("Total pengeluaran bulan %d/%d sudah mencapai %.0f%% dari total anggaran.",
-					filter.Month, filter.Year, overallPct),
-			)
-		}
-	}
-
 	return summary, nil
 }
 
