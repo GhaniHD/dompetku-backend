@@ -22,23 +22,37 @@ type BudgetService interface {
 }
 
 type budgetService struct {
-	budgetRepo  repository.BudgetRepository
-	notifSvc    NotificationService // ← inject notifikasi
+	budgetRepo   repository.BudgetRepository
+	categoryRepo repository.CategoryRepository
+	notifSvc     NotificationService
 }
 
 func NewBudgetService(
 	budgetRepo repository.BudgetRepository,
-	notifSvc   NotificationService,
+	categoryRepo repository.CategoryRepository,
+	notifSvc NotificationService,
 ) BudgetService {
 	return &budgetService{
-		budgetRepo: budgetRepo,
-		notifSvc:   notifSvc,
+		budgetRepo:   budgetRepo,
+		categoryRepo: categoryRepo,
+		notifSvc:     notifSvc,
 	}
 }
 
 // ─── CreateBudget ─────────────────────────────────────────────────────────────
 
 func (s *budgetService) CreateBudget(userID uuid.UUID, req dto.CreateBudgetRequest) (*dto.BudgetResponse, error) {
+	category, err := s.categoryRepo.FindByID(req.CategoryID, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrCategoryNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if category.Type != "expense" {
+		return nil, ErrBudgetCategoryNotExpense
+	}
+
 	existing, err := s.budgetRepo.FindByCategory(userID, req.CategoryID, req.Month, req.Year)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err

@@ -1,4 +1,3 @@
-// internal/service/transaction_service.go
 package service
 
 import (
@@ -7,6 +6,7 @@ import (
 	"dompetku/internal/repository"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -21,24 +21,25 @@ type TransactionService interface {
 }
 
 type transactionService struct {
+	db              *gorm.DB
 	transactionRepo repository.TransactionRepository
 	walletRepo      repository.WalletRepository
-	notifSvc        NotificationService // ← tambah
+	notifSvc        NotificationService
 }
 
 func NewTransactionService(
+	db *gorm.DB,
 	transactionRepo repository.TransactionRepository,
-	walletRepo      repository.WalletRepository,
-	notifSvc        NotificationService, // ← tambah
+	walletRepo repository.WalletRepository,
+	notifSvc NotificationService,
 ) TransactionService {
 	return &transactionService{
+		db:              db,
 		transactionRepo: transactionRepo,
 		walletRepo:      walletRepo,
 		notifSvc:        notifSvc,
 	}
 }
-
-// ─── deltaFromType ────────────────────────────────────────────────────────────
 
 func deltaFromType(txType string, amount float64) float64 {
 	if txType == "income" {
@@ -47,48 +48,99 @@ func deltaFromType(txType string, amount float64) float64 {
 	return -amount
 }
 
-// ─── CreateTransaction ────────────────────────────────────────────────────────
+func ensureCategory(tx *gorm.DB, userID, categoryID uuid.UUID, txType string) error {
+	category, err := repository.NewCategoryRepository(tx).FindByID(categoryID, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrCategoryNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if category.Type != txType {
+		return ErrCategoryTypeMismatch
+	}
+	return nil
+}
+
+// lockWallets mengunci wallet selalu dalam urutan ID yang sama agar dua request
+// yang menyentuh wallet yang sama tidak saling deadlock.
+func lockWallets(repo repository.WalletRepository, userID uuid.UUID, ids ...uuid.UUID) (map[uuid.UUID]*model.Wallet, error) {
+	unique := make([]uuid.UUID, 0, len(ids))
+	seen := make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	sort.Slice(unique, func(i, j int) bool { return unique[i].String() < unique[j].String() })
+
+	locked := make(map[uuid.UUID]*model.Wallet, len(unique))
+	for _, id := range unique {
+		wallet, err := repo.FindByIDForUpdate(id, userID)
+		if err != nil {
+			return nil, err
+		}
+		locked[id] = wallet
+	}
+	return locked, nil
+}
 
 func (s *transactionService) CreateTransaction(userID uuid.UUID, req dto.CreateTransactionRequest) (*dto.TransactionDetailResponse, error) {
-	if req.Type != "income" && req.Type != "expense" {
-		return nil, errors.New("tipe transaksi harus 'income' atau 'expense'")
-	}
+	var createdID uuid.UUID
 
-	transaction := &model.Transaction{
-		UserID:          userID,
-		WalletID:        req.WalletID,
-		CategoryID:      req.CategoryID,
-		Amount:          req.Amount,
-		Type:            req.Type,
-		Note:            req.Note,
-		TransactionDate: req.Date,
-	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		walletRepo := repository.NewWalletRepository(tx)
 
-	if err := s.transactionRepo.Create(transaction); err != nil {
-		return nil, err
-	}
+		wallets, err := lockWallets(walletRepo, userID, req.WalletID)
+		if err != nil {
+			return err
+		}
+		if wallets[req.WalletID].DeletedAt.Valid {
+			return ErrWalletNotFound
+		}
+		if err := ensureCategory(tx, userID, req.CategoryID, req.Type); err != nil {
+			return err
+		}
 
-	delta := deltaFromType(req.Type, req.Amount)
-	if err := s.walletRepo.AddBalance(req.WalletID, userID, delta); err != nil {
-		return nil, errors.New("transaksi tersimpan tapi gagal update saldo dompet")
-	}
+		transaction := &model.Transaction{
+			UserID:          userID,
+			WalletID:        req.WalletID,
+			CategoryID:      req.CategoryID,
+			Amount:          req.Amount,
+			Type:            req.Type,
+			Note:            req.Note,
+			TransactionDate: req.Date,
+		}
+		if err := repository.NewTransactionRepository(tx).Create(transaction); err != nil {
+			return err
+		}
+		createdID = transaction.ID
 
-	created, err := s.transactionRepo.FindByID(transaction.ID, userID)
+		return walletRepo.AddBalance(req.WalletID, userID, deltaFromType(req.Type, req.Amount))
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// ── Cek saldo dompet setelah transaksi ────────────────────────────
-	wallet, err := s.walletRepo.FindByID(req.WalletID, userID)
+	created, err := s.transactionRepo.FindByID(createdID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	s.notifyAfterCreate(userID, created)
+	return toDetailResponse(created), nil
+}
+
+func (s *transactionService) notifyAfterCreate(userID uuid.UUID, t *model.Transaction) {
+	wallet, err := s.walletRepo.FindByID(t.WalletID, userID)
 	if err == nil {
-		// Saldo hampir habis: di bawah 50.000
 		if wallet.Balance < 50_000 && wallet.Balance >= 0 {
 			_ = s.notifSvc.CreateSystem(userID,
 				"Saldo Hampir Habis ⚠️",
 				fmt.Sprintf("Saldo dompet \"%s\" tinggal Rp %.0f. Segera isi ulang.", wallet.Name, wallet.Balance),
 			)
 		}
-		// Saldo minus
 		if wallet.Balance < 0 {
 			_ = s.notifSvc.CreateSystem(userID,
 				"Saldo Minus ❗",
@@ -97,41 +149,31 @@ func (s *transactionService) CreateTransaction(userID uuid.UUID, req dto.CreateT
 		}
 	}
 
-	// ── Pengeluaran besar (≥ 500.000) ─────────────────────────────────
-	if req.Type == "expense" && req.Amount >= 500_000 {
+	if t.Type == "expense" && t.Amount >= 500_000 {
 		_ = s.notifSvc.CreateSystem(userID,
 			"Pengeluaran Besar Tercatat 💸",
-			fmt.Sprintf("Pengeluaran sebesar Rp %.0f untuk kategori \"%s\" baru saja dicatat.",
-				req.Amount, created.Category.Name),
+			fmt.Sprintf("Pengeluaran sebesar Rp %.0f untuk kategori \"%s\" baru saja dicatat.", t.Amount, t.Category.Name),
 		)
 	}
 
-	// ── Pemasukan besar (≥ 1.000.000) ─────────────────────────────────
-	if req.Type == "income" && req.Amount >= 1_000_000 {
+	if t.Type == "income" && t.Amount >= 1_000_000 {
 		_ = s.notifSvc.CreateSystem(userID,
 			"Pemasukan Masuk 💰",
-			fmt.Sprintf("Pemasukan sebesar Rp %.0f dari kategori \"%s\" berhasil dicatat.",
-				req.Amount, created.Category.Name),
+			fmt.Sprintf("Pemasukan sebesar Rp %.0f dari kategori \"%s\" berhasil dicatat.", t.Amount, t.Category.Name),
 		)
 	}
-
-	return toDetailResponse(created), nil
 }
-
-// ─── GetTransactionByID ───────────────────────────────────────────────────────
 
 func (s *transactionService) GetTransactionByID(userID uuid.UUID, id uuid.UUID) (*dto.TransactionDetailResponse, error) {
 	transaction, err := s.transactionRepo.FindByID(id, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrTransactionNotFound
+	}
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("transaksi tidak ditemukan")
-		}
 		return nil, err
 	}
 	return toDetailResponse(transaction), nil
 }
-
-// ─── GetAllTransactions ───────────────────────────────────────────────────────
 
 func (s *transactionService) GetAllTransactions(userID uuid.UUID, filter dto.TransactionFilterRequest) ([]dto.TransactionResponse, error) {
 	transactions, err := s.transactionRepo.FindAll(userID, filter)
@@ -139,106 +181,117 @@ func (s *transactionService) GetAllTransactions(userID uuid.UUID, filter dto.Tra
 		return nil, err
 	}
 
-	var responses []dto.TransactionResponse
+	responses := make([]dto.TransactionResponse, 0, len(transactions))
 	for _, t := range transactions {
 		responses = append(responses, toListResponse(t))
-	}
-	if responses == nil {
-		responses = []dto.TransactionResponse{}
 	}
 	return responses, nil
 }
 
-// ─── UpdateTransaction ────────────────────────────────────────────────────────
-
 func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, req dto.UpdateTransactionRequest) (*dto.TransactionDetailResponse, error) {
-	old, err := s.transactionRepo.FindByID(id, userID)
-	if err != nil {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		transactionRepo := repository.NewTransactionRepository(tx)
+		walletRepo := repository.NewWalletRepository(tx)
+
+		t, err := transactionRepo.FindByID(id, userID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("transaksi tidak ditemukan")
+			return ErrTransactionNotFound
 		}
-		return nil, err
-	}
+		if err != nil {
+			return err
+		}
 
-	if req.Type != "" && req.Type != "income" && req.Type != "expense" {
-		return nil, errors.New("tipe transaksi harus 'income' atau 'expense'")
-	}
+		oldWalletID := t.WalletID
+		oldDelta := deltaFromType(t.Type, t.Amount)
+		needCategoryCheck := false
 
-	oldWalletID := old.WalletID
-	oldDelta := deltaFromType(old.Type, old.Amount)
+		if req.WalletID != nil {
+			t.WalletID = *req.WalletID
+		}
+		if req.CategoryID != nil && *req.CategoryID != t.CategoryID {
+			t.CategoryID = *req.CategoryID
+			needCategoryCheck = true
+		}
+		if req.Type != nil && *req.Type != t.Type {
+			t.Type = *req.Type
+			needCategoryCheck = true
+		}
+		if req.Amount != nil {
+			t.Amount = *req.Amount
+		}
+		if req.Note != nil {
+			t.Note = *req.Note
+		}
+		if req.Date != nil {
+			t.TransactionDate = *req.Date
+		}
 
-	if req.WalletID != uuid.Nil {
-		old.WalletID = req.WalletID
-	}
-	if req.CategoryID != uuid.Nil {
-		old.CategoryID = req.CategoryID
-	}
-	if req.Amount != 0 {
-		old.Amount = req.Amount
-	}
-	if req.Type != "" {
-		old.Type = req.Type
-	}
-	if req.Note != "" {
-		old.Note = req.Note
-	}
-	if !req.Date.IsZero() {
-		old.TransactionDate = req.Date
-	}
-
-	if err := s.transactionRepo.Update(old); err != nil {
-		return nil, err
-	}
-
-	newDelta := deltaFromType(old.Type, old.Amount)
-
-	if oldWalletID == old.WalletID {
-		diff := newDelta - oldDelta
-		if diff != 0 {
-			if err := s.walletRepo.AddBalance(old.WalletID, userID, diff); err != nil {
-				return nil, errors.New("transaksi diperbarui tapi gagal update saldo dompet")
+		if needCategoryCheck {
+			if err := ensureCategory(tx, userID, t.CategoryID, t.Type); err != nil {
+				return err
 			}
 		}
-	} else {
-		if err := s.walletRepo.AddBalance(oldWalletID, userID, -oldDelta); err != nil {
-			return nil, errors.New("gagal mengembalikan saldo dompet lama")
+
+		wallets, err := lockWallets(walletRepo, userID, oldWalletID, t.WalletID)
+		if err != nil {
+			return err
 		}
-		if err := s.walletRepo.AddBalance(old.WalletID, userID, newDelta); err != nil {
-			return nil, errors.New("gagal menambahkan saldo dompet baru")
+		if t.WalletID != oldWalletID && wallets[t.WalletID].DeletedAt.Valid {
+			return ErrWalletNotFound
 		}
+
+		if err := transactionRepo.Update(t); err != nil {
+			return err
+		}
+
+		newDelta := deltaFromType(t.Type, t.Amount)
+
+		if oldWalletID == t.WalletID {
+			if diff := newDelta - oldDelta; diff != 0 {
+				return walletRepo.AddBalance(t.WalletID, userID, diff)
+			}
+			return nil
+		}
+
+		if err := walletRepo.AddBalance(oldWalletID, userID, -oldDelta); err != nil {
+			return err
+		}
+		return walletRepo.AddBalance(t.WalletID, userID, newDelta)
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	updated, err := s.transactionRepo.FindByID(old.ID, userID)
+	updated, err := s.transactionRepo.FindByID(id, userID)
 	if err != nil {
 		return nil, err
 	}
 	return toDetailResponse(updated), nil
 }
 
-// ─── DeleteTransaction ────────────────────────────────────────────────────────
-
 func (s *transactionService) DeleteTransaction(userID uuid.UUID, id uuid.UUID) error {
-	tx, err := s.transactionRepo.FindByID(id, userID)
-	if err != nil {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		transactionRepo := repository.NewTransactionRepository(tx)
+		walletRepo := repository.NewWalletRepository(tx)
+
+		t, err := transactionRepo.FindByID(id, userID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("transaksi tidak ditemukan")
+			return ErrTransactionNotFound
 		}
-		return err
-	}
+		if err != nil {
+			return err
+		}
 
-	if err := s.transactionRepo.Delete(id, userID); err != nil {
-		return err
-	}
+		if _, err := lockWallets(walletRepo, userID, t.WalletID); err != nil {
+			return err
+		}
+		if err := transactionRepo.Delete(id, userID); err != nil {
+			return err
+		}
 
-	delta := deltaFromType(tx.Type, tx.Amount)
-	if err := s.walletRepo.AddBalance(tx.WalletID, userID, -delta); err != nil {
-		return errors.New("transaksi dihapus tapi gagal mengembalikan saldo dompet")
-	}
-
-	return nil
+		return walletRepo.AddBalance(t.WalletID, userID, -deltaFromType(t.Type, t.Amount))
+	})
 }
-
-// ─── Helper mapper ────────────────────────────────────────────────────────────
 
 func toListResponse(t model.Transaction) dto.TransactionResponse {
 	return dto.TransactionResponse{

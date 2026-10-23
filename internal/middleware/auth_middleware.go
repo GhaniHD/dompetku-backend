@@ -1,59 +1,58 @@
 package middleware
 
 import (
+	"dompetku/internal/repository"
 	"dompetku/pkg/config"
 	"dompetku/pkg/utils"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-// AuthMiddleware memvalidasi JWT token dari header Authorization
-// dan menyimpan userID ke Gin context untuk digunakan oleh handler
-func AuthMiddleware(cfg *config.AppConf) gin.HandlerFunc {
+func abortJSON(c *gin.Context, status int, message string) {
+	c.AbortWithStatusJSON(status, gin.H{
+		"success": false,
+		"message": message,
+		"data":    nil,
+	})
+}
+
+// AuthMiddleware memvalidasi JWT dan memastikan akun pemilik token masih ada,
+// sehingga token milik akun yang sudah dihapus langsung ditolak.
+func AuthMiddleware(cfg *config.AppConf, userRepo repository.UserRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"success": false,
-				"message": "authorization header tidak ditemukan",
-				"data":    nil,
-			})
-			c.Abort() // Hentikan request, jangan lanjut ke handler
+			abortJSON(c, http.StatusUnauthorized, "authorization header tidak ditemukan")
 			return
 		}
 
-		// Format header yang diharapkan: Bearer <token>
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"success": false,
-				"message": "format authorization header tidak valid",
-				"data":    nil,
-			})
-			c.Abort()
+			abortJSON(c, http.StatusUnauthorized, "format authorization header tidak valid")
 			return
 		}
 
-		// Validasi token JWT
-		token := parts[1]
-		claims, err := utils.ValidateToken(token, cfg.JWTSecret)
+		claims, err := utils.ValidateToken(parts[1], cfg.JWTSecret)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"success": false,
-				"message": "token tidak valid atau sudah kadaluarsa",
-				"data":    nil,
-			})
-			c.Abort()
+			abortJSON(c, http.StatusUnauthorized, "token tidak valid atau sudah kadaluarsa")
 			return
 		}
 
-		// Simpan userID ke Gin context agar bisa diambil oleh handler
-		// Key "user_id" harus sesuai dengan c.Get("user_id") di handler
-		c.Set("user_id", claims.UserID)
+		if _, err := userRepo.FindByID(c.Request.Context(), claims.UserID); err != nil {
+			if errors.Is(err, repository.ErrUserNotFound) {
+				abortJSON(c, http.StatusUnauthorized, "akun tidak ditemukan, silakan login ulang")
+				return
+			}
+			log.Printf("[auth] gagal cek user %s: %v", claims.UserID, err)
+			abortJSON(c, http.StatusInternalServerError, "terjadi kesalahan internal")
+			return
+		}
 
-		// Lanjutkan ke handler berikutnya
+		c.Set("user_id", claims.UserID)
 		c.Next()
 	}
 }

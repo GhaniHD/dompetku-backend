@@ -1,4 +1,3 @@
-// api/handler/transaction_handler.go
 package handler
 
 import (
@@ -12,23 +11,19 @@ import (
 	"go.uber.org/fx"
 )
 
-// TransactionHandler menangani request HTTP yang berkaitan dengan transaksi.
 type TransactionHandler struct {
 	transactionService service.TransactionService
 }
 
-// TransactionHandlerParams adalah parameter dependency injection menggunakan Uber FX.
 type TransactionHandlerParams struct {
 	fx.In
 	TransactionService service.TransactionService
 }
 
-// NewTransactionHandler membuat instance baru TransactionHandler.
 func NewTransactionHandler(p TransactionHandlerParams) *TransactionHandler {
 	return &TransactionHandler{transactionService: p.TransactionService}
 }
 
-// RegisterRoutes mendaftarkan semua endpoint transaksi ke router group.
 func (h *TransactionHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	transactions := rg.Group("/transactions")
 	{
@@ -42,7 +37,7 @@ func (h *TransactionHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 // POST /api/transactions
 func (h *TransactionHandler) CreateTransaction(c *gin.Context) {
-	userID, ok := getUserID(c) // dari helpers.go
+	userID, ok := getUserID(c)
 	if !ok {
 		unauthorizedResponse(c)
 		return
@@ -56,7 +51,7 @@ func (h *TransactionHandler) CreateTransaction(c *gin.Context) {
 
 	result, err := h.transactionService.CreateTransaction(userID, req)
 	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 
@@ -79,7 +74,7 @@ func (h *TransactionHandler) GetAllTransactions(c *gin.Context) {
 
 	results, err := h.transactionService.GetAllTransactions(userID, filter)
 	if err != nil {
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 
@@ -102,11 +97,7 @@ func (h *TransactionHandler) GetTransactionByID(c *gin.Context) {
 
 	result, err := h.transactionService.GetTransactionByID(userID, id)
 	if err != nil {
-		if err.Error() == "transaksi tidak ditemukan" {
-			errorResponse(c, http.StatusNotFound, err.Error())
-			return
-		}
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 
@@ -135,11 +126,7 @@ func (h *TransactionHandler) UpdateTransaction(c *gin.Context) {
 
 	result, err := h.transactionService.UpdateTransaction(userID, id, req)
 	if err != nil {
-		if err.Error() == "transaksi tidak ditemukan" {
-			errorResponse(c, http.StatusNotFound, err.Error())
-			return
-		}
-		errorResponse(c, http.StatusBadRequest, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 
@@ -161,11 +148,7 @@ func (h *TransactionHandler) DeleteTransaction(c *gin.Context) {
 	}
 
 	if err := h.transactionService.DeleteTransaction(userID, id); err != nil {
-		if err.Error() == "transaksi tidak ditemukan" {
-			errorResponse(c, http.StatusNotFound, err.Error())
-			return
-		}
-		errorResponse(c, http.StatusInternalServerError, err.Error())
+		serviceErrorResponse(c, err)
 		return
 	}
 

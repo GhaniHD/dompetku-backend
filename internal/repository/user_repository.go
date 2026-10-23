@@ -9,11 +9,15 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrUserNotFound = errors.New("user not found")
 
 type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
+	// EmailTaken ikut menghitung akun yang sudah soft-delete karena unique index
+	// email di database masih memegang baris tersebut.
+	EmailTaken(ctx context.Context, email string) (bool, error)
 }
 
 type userRepository struct {
@@ -32,7 +36,7 @@ func (r *userRepository) FindByEmail(ctx context.Context, email string) (*model.
 	var user model.User
 
 	err := r.db.WithContext(ctx).
-		Where("email = ?", email).
+		Where("LOWER(email) = LOWER(?)", email).
 		First(&user).Error
 
 	if err != nil {
@@ -51,10 +55,20 @@ func (r *userRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Use
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("user not found")
+			return nil, ErrUserNotFound
 		}
 		return nil, err
 	}
 
 	return &user, nil
+}
+
+func (r *userRepository) EmailTaken(ctx context.Context, email string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Unscoped().
+		Model(&model.User{}).
+		Where("LOWER(email) = LOWER(?)", email).
+		Count(&count).Error
+	return count > 0, err
 }

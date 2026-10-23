@@ -1,29 +1,28 @@
 package dto
 
 import (
-    "time"
-    "github.com/google/uuid"
+	"time"
+
+	"github.com/google/uuid"
 )
 
-// Response DTO (List / Detail)
 type TransactionResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Amount    float64   `json:"amount"`
-	Type      string    `json:"type"`
-	Note      string    `json:"note"`
-	Date      time.Time `json:"date"`
+	ID     uuid.UUID `json:"id"`
+	Amount float64   `json:"amount"`
+	Type   string    `json:"type"`
+	Note   string    `json:"note"`
+	Date   time.Time `json:"date"`
 
 	WalletName   string `json:"wallet_name"`
 	CategoryName string `json:"category_name"`
 }
 
-// Detail Transaction DTO
 type TransactionDetailResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Amount    float64   `json:"amount"`
-	Type      string    `json:"type"`
-	Note      string    `json:"note"`
-	Date      time.Time `json:"date"`
+	ID     uuid.UUID `json:"id"`
+	Amount float64   `json:"amount"`
+	Type   string    `json:"type"`
+	Note   string    `json:"note"`
+	Date   time.Time `json:"date"`
 
 	Wallet struct {
 		ID   uuid.UUID `json:"id"`
@@ -36,31 +35,29 @@ type TransactionDetailResponse struct {
 	} `json:"category"`
 }
 
-// Create Transaction DTO
 type CreateTransactionRequest struct {
-	WalletID   uuid.UUID `json:"wallet_id" binding:"required"`
+	WalletID   uuid.UUID `json:"wallet_id"   binding:"required"`
 	CategoryID uuid.UUID `json:"category_id" binding:"required"`
-	Amount     float64   `json:"amount" binding:"required"`
-	Type       string    `json:"type" binding:"required"` // income / expense
+	Amount     float64   `json:"amount"      binding:"required,gt=0"`
+	Type       string    `json:"type"        binding:"required,oneof=income expense"`
 	Note       string    `json:"note"`
-	Date       time.Time `json:"date" binding:"required"`
+	Date       time.Time `json:"date"        binding:"required"`
 }
 
-// Update Transaction DTO
+// Field pointer: nil = tidak diubah, sehingga note bisa dikosongkan dengan "".
 type UpdateTransactionRequest struct {
-	WalletID   uuid.UUID `json:"wallet_id"`
-	CategoryID uuid.UUID `json:"category_id"`
-	Amount     float64   `json:"amount"`
-	Type       string    `json:"type"`
-	Note       string    `json:"note"`
-	Date       time.Time `json:"date"`
+	WalletID   *uuid.UUID `json:"wallet_id"`
+	CategoryID *uuid.UUID `json:"category_id"`
+	Amount     *float64   `json:"amount" binding:"omitempty,gt=0"`
+	Type       *string    `json:"type"   binding:"omitempty,oneof=income expense"`
+	Note       *string    `json:"note"`
+	Date       *time.Time `json:"date"`
 }
 
-// Filter / Query DTO
 type TransactionFilterRequest struct {
 	WalletID   *uuid.UUID `form:"wallet_id"`
 	CategoryID *uuid.UUID `form:"category_id"`
-	Type       *string    `form:"type"`
+	Type       *string    `form:"type" binding:"omitempty,oneof=income expense"`
 	StartDate  *time.Time `form:"start_date"`
 	EndDate    *time.Time `form:"end_date"`
 }

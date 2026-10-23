@@ -129,8 +129,9 @@ func (r *profileRepository) CountWallets(ctx context.Context, userID uuid.UUID) 
 func (r *profileRepository) EmailExistsExcept(ctx context.Context, email string, excludeID uuid.UUID) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
+		Unscoped().
 		Model(&model.User{}).
-		Where("email = ? AND id != ? AND deleted_at IS NULL", email, excludeID).
+		Where("LOWER(email) = LOWER(?) AND id != ?", email, excludeID).
 		Count(&count).Error
 	return count > 0, err
 }
