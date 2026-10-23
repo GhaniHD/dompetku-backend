@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"dompetku/internal/dto"
@@ -91,7 +92,9 @@ func (s *profileService) GetProfile(ctx context.Context, userID uuid.UUID) (*dto
 // ─── UpdateProfile ────────────────────────────────────────────────────────────
 
 func (s *profileService) UpdateProfile(ctx context.Context, userID uuid.UUID, req *dto.UpdateProfileRequest) (*dto.ProfileResponse, error) {
-	// Cek duplikat email
+	req.Name = strings.TrimSpace(req.Name)
+	req.Email = normalizeEmail(req.Email)
+
 	exists, err := s.profileRepo.EmailExistsExcept(ctx, req.Email, userID)
 	if err != nil {
 		return nil, err

@@ -9,7 +9,11 @@ import (
 	"dompetku/pkg/crypto"
 	"dompetku/pkg/utils"
 	"errors"
+	"net/mail"
+	"strings"
 )
+
+const minPasswordLength = 8
 
 type AuthService interface {
 	Register(ctx context.Context, req dto.RegisterRequest) (*dto.AuthResponse, error)
@@ -28,32 +32,40 @@ func NewAuthService(userRepo repository.UserRepository, cfg *config.AppConf) Aut
 	}
 }
 
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
 func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*dto.AuthResponse, error) {
-	// Validasi input
-	if req.Name == "" || req.Email == "" || req.Password == "" {
+	name := strings.TrimSpace(req.Name)
+	email := normalizeEmail(req.Email)
+
+	if name == "" || email == "" || req.Password == "" {
 		return nil, errors.New("all fields are required")
 	}
-
-	if len(req.Password) < 6 {
-		return nil, errors.New("password must be at least 6 characters")
+	if _, err := mail.ParseAddress(email); err != nil {
+		return nil, errors.New("invalid email format")
+	}
+	if len(req.Password) < minPasswordLength || len(req.Password) > 72 {
+		return nil, errors.New("password must be 8-72 characters")
 	}
 
-	// Cek apakah email sudah terdaftar
-	existingUser, _ := s.userRepo.FindByEmail(ctx, req.Email)
-	if existingUser != nil {
+	taken, err := s.userRepo.EmailTaken(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if taken {
 		return nil, errors.New("email already registered")
 	}
 
-	// Hash password
 	hashedPassword, err := crypto.HashPassword(req.Password)
 	if err != nil {
 		return nil, err
 	}
 
-	// Buat user baru
 	user := &model.User{
-		Name:     req.Name,
-		Email:    req.Email,
+		Name:     name,
+		Email:    email,
 		Password: hashedPassword,
 	}
 
@@ -61,41 +73,28 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 		return nil, err
 	}
 
-	// Generate token
-	token, err := utils.GenerateToken(user.ID, user.Email, s.cfg.JWTSecret)
-	if err != nil {
-		return nil, err
-	}
-
-	return &dto.AuthResponse{
-		Token: token,
-		User: dto.UserResponse{
-			ID:        user.ID.String(),
-			Name:      user.Name,
-			Email:     user.Email,
-			CreatedAt: user.CreatedAt.Format("2006-01-02 15:04:05"),
-		},
-	}, nil
+	return s.buildAuthResponse(user)
 }
 
 func (s *authService) Login(ctx context.Context, req dto.LoginRequest) (*dto.AuthResponse, error) {
-	// Validasi input
-	if req.Email == "" || req.Password == "" {
+	email := normalizeEmail(req.Email)
+	if email == "" || req.Password == "" {
 		return nil, errors.New("email and password are required")
 	}
 
-	// Cari user berdasarkan email
-	user, err := s.userRepo.FindByEmail(ctx, req.Email)
-	if err != nil {
+	user, err := s.userRepo.FindByEmail(ctx, email)
+	if err != nil || user == nil {
 		return nil, errors.New("invalid email or password")
 	}
 
-	// Verifikasi password
 	if !crypto.CheckPasswordHash(req.Password, user.Password) {
 		return nil, errors.New("invalid email or password")
 	}
 
-	// Generate token
+	return s.buildAuthResponse(user)
+}
+
+func (s *authService) buildAuthResponse(user *model.User) (*dto.AuthResponse, error) {
 	token, err := utils.GenerateToken(user.ID, user.Email, s.cfg.JWTSecret)
 	if err != nil {
 		return nil, err

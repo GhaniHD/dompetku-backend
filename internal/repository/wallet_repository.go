@@ -1,4 +1,3 @@
-// internal/repository/wallet_repository.go
 package repository
 
 import (
@@ -7,17 +6,22 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+var ErrWalletNotFound = errors.New("dompet tidak ditemukan")
 
 type WalletRepository interface {
 	Create(wallet *model.Wallet) error
 	FindByID(id uuid.UUID, userID uuid.UUID) (*model.Wallet, error)
+	// FindByIDForUpdate mengunci baris wallet (SELECT ... FOR UPDATE) dan ikut
+	// mengembalikan wallet yang sudah soft-delete; cek DeletedAt di pemanggil.
+	// Wajib dipanggil di dalam db.Transaction.
+	FindByIDForUpdate(id uuid.UUID, userID uuid.UUID) (*model.Wallet, error)
 	FindAll(userID uuid.UUID) ([]model.Wallet, error)
 	Update(wallet *model.Wallet) error
 	Delete(id uuid.UUID, userID uuid.UUID) error
 	SumBalance(userID uuid.UUID) (float64, error)
-	// AddBalance menambah atau mengurangi balance secara atomic di DB
-	// delta positif = tambah, delta negatif = kurangi
 	AddBalance(walletID uuid.UUID, userID uuid.UUID, delta float64) error
 }
 
@@ -39,9 +43,28 @@ func (r *walletRepository) FindByID(id uuid.UUID, userID uuid.UUID) (*model.Wall
 		Where("id = ? AND user_id = ?", id, userID).
 		First(&wallet).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, errors.New("dompet tidak ditemukan")
+		return nil, ErrWalletNotFound
 	}
-	return &wallet, err
+	if err != nil {
+		return nil, err
+	}
+	return &wallet, nil
+}
+
+func (r *walletRepository) FindByIDForUpdate(id uuid.UUID, userID uuid.UUID) (*model.Wallet, error) {
+	var wallet model.Wallet
+	err := r.db.
+		Unscoped().
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND user_id = ?", id, userID).
+		First(&wallet).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWalletNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &wallet, nil
 }
 
 func (r *walletRepository) FindAll(userID uuid.UUID) ([]model.Wallet, error) {
@@ -54,7 +77,7 @@ func (r *walletRepository) FindAll(userID uuid.UUID) ([]model.Wallet, error) {
 }
 
 func (r *walletRepository) Update(wallet *model.Wallet) error {
-	return r.db.Save(wallet).Error
+	return r.db.Omit(clause.Associations).Save(wallet).Error
 }
 
 func (r *walletRepository) Delete(id uuid.UUID, userID uuid.UUID) error {
@@ -65,7 +88,7 @@ func (r *walletRepository) Delete(id uuid.UUID, userID uuid.UUID) error {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("dompet tidak ditemukan")
+		return ErrWalletNotFound
 	}
 	return nil
 }
@@ -79,10 +102,10 @@ func (r *walletRepository) SumBalance(userID uuid.UUID) (float64, error) {
 	return total, err
 }
 
-// AddBalance mengupdate balance wallet secara atomic menggunakan SQL expression.
-// Lebih aman dari read-then-write karena menghindari race condition.
+// AddBalance juga berlaku untuk wallet yang sudah soft-delete, supaya hapus/edit
+// transaksi lama tetap bisa mengembalikan saldonya.
 func (r *walletRepository) AddBalance(walletID uuid.UUID, userID uuid.UUID, delta float64) error {
-	result := r.db.Model(&model.Wallet{}).
+	result := r.db.Unscoped().Model(&model.Wallet{}).
 		Where("id = ? AND user_id = ?", walletID, userID).
 		UpdateColumn("balance", gorm.Expr("balance + ?", delta))
 
@@ -90,7 +113,7 @@ func (r *walletRepository) AddBalance(walletID uuid.UUID, userID uuid.UUID, delt
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("dompet tidak ditemukan")
+		return ErrWalletNotFound
 	}
 	return nil
 }

@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-// TransactionRepository mendefinisikan kontrak operasi database untuk transaksi
 type TransactionRepository interface {
 	Create(transaction *model.Transaction) error
 	FindByID(id uuid.UUID, userID uuid.UUID) (*model.Transaction, error)
@@ -17,31 +17,36 @@ type TransactionRepository interface {
 	Delete(id uuid.UUID, userID uuid.UUID) error
 }
 
-// transactionRepository adalah implementasi dari TransactionRepository
 type transactionRepository struct {
 	db *gorm.DB
 }
 
-// NewTransactionRepository membuat instance baru TransactionRepository
 func NewTransactionRepository(db *gorm.DB) TransactionRepository {
 	return &transactionRepository{db: db}
 }
 
-// Create menyimpan data transaksi baru ke database
-func (r *transactionRepository) Create(transaction *model.Transaction) error {
-	return r.db.Create(transaction).Error
+// Wallet & kategori yang sudah soft-delete tetap dimuat agar namanya tidak kosong
+// di riwayat transaksi.
+func withRelations(db *gorm.DB, userID uuid.UUID) *gorm.DB {
+	return db.
+		Preload("Wallet", func(tx *gorm.DB) *gorm.DB {
+			return tx.Unscoped().Where("user_id = ?", userID)
+		}).
+		Preload("Category", func(tx *gorm.DB) *gorm.DB {
+			return tx.Unscoped().Where("user_id = ?", userID)
+		})
 }
 
-// FindByID mencari satu transaksi berdasarkan ID dan UserID (mencegah akses data user lain)
+func (r *transactionRepository) Create(transaction *model.Transaction) error {
+	return r.db.Omit(clause.Associations).Create(transaction).Error
+}
+
 func (r *transactionRepository) FindByID(id uuid.UUID, userID uuid.UUID) (*model.Transaction, error) {
 	var transaction model.Transaction
 
-	err := r.db.
-		Preload("Wallet").   // Muat relasi wallet
-		Preload("Category"). // Muat relasi category
+	err := withRelations(r.db, userID).
 		Where("id = ? AND user_id = ?", id, userID).
 		First(&transaction).Error
-
 	if err != nil {
 		return nil, err
 	}
@@ -49,32 +54,20 @@ func (r *transactionRepository) FindByID(id uuid.UUID, userID uuid.UUID) (*model
 	return &transaction, nil
 }
 
-// FindAll mengambil semua transaksi milik user dengan dukungan filter
 func (r *transactionRepository) FindAll(userID uuid.UUID, filter dto.TransactionFilterRequest) ([]model.Transaction, error) {
 	var transactions []model.Transaction
 
-	// Query dasar: hanya ambil transaksi milik user yang sedang login
-	query := r.db.
-		Preload("Wallet").
-		Preload("Category").
-		Where("user_id = ?", userID)
+	query := withRelations(r.db, userID).Where("user_id = ?", userID)
 
-	// Filter opsional berdasarkan wallet
 	if filter.WalletID != nil {
 		query = query.Where("wallet_id = ?", *filter.WalletID)
 	}
-
-	// Filter opsional berdasarkan category
 	if filter.CategoryID != nil {
 		query = query.Where("category_id = ?", *filter.CategoryID)
 	}
-
-	// Filter opsional berdasarkan tipe (income/expense)
 	if filter.Type != nil {
 		query = query.Where("type = ?", *filter.Type)
 	}
-
-	// Filter opsional berdasarkan rentang tanggal
 	if filter.StartDate != nil {
 		query = query.Where("transaction_date >= ?", *filter.StartDate)
 	}
@@ -82,18 +75,16 @@ func (r *transactionRepository) FindAll(userID uuid.UUID, filter dto.Transaction
 		query = query.Where("transaction_date <= ?", *filter.EndDate)
 	}
 
-	// Urutkan dari transaksi terbaru
-	err := query.Order("transaction_date DESC").Find(&transactions).Error
-
+	err := query.Order("transaction_date DESC, created_at DESC").Find(&transactions).Error
 	return transactions, err
 }
 
-// Update menyimpan perubahan data transaksi ke database
+// Omit(clause.Associations) wajib: tanpa itu GORM menimpa wallet_id/category_id
+// baru dengan ID dari struct Wallet/Category yang sudah di-preload.
 func (r *transactionRepository) Update(transaction *model.Transaction) error {
-	return r.db.Save(transaction).Error
+	return r.db.Omit(clause.Associations).Save(transaction).Error
 }
 
-// Delete menghapus transaksi secara soft delete berdasarkan ID dan UserID
 func (r *transactionRepository) Delete(id uuid.UUID, userID uuid.UUID) error {
 	return r.db.
 		Where("id = ? AND user_id = ?", id, userID).
