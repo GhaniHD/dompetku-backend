@@ -56,7 +56,11 @@ func serviceErrorResponse(c *gin.Context, err error) {
 		errors.Is(err, service.ErrWalletNotFound),
 		errors.Is(err, service.ErrCategoryNotFound),
 		errors.Is(err, service.ErrTransferNotFound),
-		errors.Is(err, service.ErrNotificationNotFound):
+		errors.Is(err, service.ErrNotificationNotFound),
+		errors.Is(err, service.ErrRecurringNotFound),
+		errors.Is(err, service.ErrDebtNotFound),
+		errors.Is(err, service.ErrDebtPaymentNotFound),
+		errors.Is(err, service.ErrGoalNotFound):
 		errorResponse(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrCategoryTypeMismatch),
 		errors.Is(err, service.ErrBudgetCategoryNotExpense),
@@ -65,10 +69,13 @@ func serviceErrorResponse(c *gin.Context, err error) {
 		errors.Is(err, service.ErrWalletArchived),
 		errors.Is(err, service.ErrNegativeOpeningBalance),
 		errors.Is(err, service.ErrWalletTypeNegative),
-		errors.Is(err, service.ErrAdjustmentNoChange):
+		errors.Is(err, service.ErrAdjustmentNoChange),
+		errors.Is(err, service.ErrRecurringEndBeforeStart),
+		errors.Is(err, service.ErrDebtOverpaid):
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrTransactionIsTransferFee),
-		errors.Is(err, service.ErrWalletNotEmpty):
+		errors.Is(err, service.ErrWalletNotEmpty),
+		errors.Is(err, service.ErrGoalWalletTaken):
 		errorResponse(c, http.StatusConflict, err.Error())
 	default:
 		log.Printf("[%s %s] %v", c.Request.Method, c.FullPath(), err)

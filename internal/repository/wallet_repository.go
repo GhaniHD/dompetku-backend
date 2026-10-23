@@ -127,7 +127,9 @@ func (r *walletRepository) HasHistory(walletID uuid.UUID) (bool, error) {
 	err := r.db.Raw(`SELECT
 		EXISTS (SELECT 1 FROM transactions WHERE wallet_id = ? AND deleted_at IS NULL)
 		OR EXISTS (SELECT 1 FROM transfers WHERE (from_wallet_id = ? OR to_wallet_id = ?) AND deleted_at IS NULL)
-		OR EXISTS (SELECT 1 FROM balance_adjustments WHERE wallet_id = ? AND deleted_at IS NULL)`,
-		walletID, walletID, walletID, walletID).Scan(&exists).Error
+		OR EXISTS (SELECT 1 FROM balance_adjustments WHERE wallet_id = ? AND deleted_at IS NULL)
+		OR EXISTS (SELECT 1 FROM debt_movements WHERE wallet_id = ? AND deleted_at IS NULL)
+		OR EXISTS (SELECT 1 FROM goals WHERE wallet_id = ? AND deleted_at IS NULL)`,
+		walletID, walletID, walletID, walletID, walletID, walletID).Scan(&exists).Error
 	return exists, err
 }

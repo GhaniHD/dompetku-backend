@@ -7,6 +7,9 @@ import "github.com/google/uuid"
 type ReportFilterRequest struct {
 	Month int `form:"month" binding:"required,min=1,max=12"`
 	Year  int `form:"year"  binding:"required,min=2000"`
+	// Period "calendar" (default) = tanggal 1 s.d. akhir bulan; "cycle" = mengikuti
+	// tanggal gajian user, sama dengan periode budget.
+	Period string `form:"period" binding:"omitempty,oneof=calendar cycle"`
 }
 
 type YearlyReportFilterRequest struct {
@@ -39,8 +42,11 @@ type MonthSummary struct {
 }
 
 type ReportResponse struct {
-	Month int `json:"month"`
-	Year  int `json:"year"`
+	Month       int    `json:"month"`
+	Year        int    `json:"year"`
+	Period      string `json:"period"`
+	PeriodStart string `json:"period_start"`
+	PeriodEnd   string `json:"period_end"`
 
 	TotalIncome  float64 `json:"total_income"`
 	TotalExpense float64 `json:"total_expense"`

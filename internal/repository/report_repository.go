@@ -2,15 +2,17 @@ package repository
 
 import (
 	"dompetku/internal/dto"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type ReportRepository interface {
-	GetTotalByType(userID uuid.UUID, txType string, month, year int) (float64, error)
-	GetBreakdownByCategory(userID uuid.UUID, txType string, month, year int) ([]dto.CategoryBreakdown, error)
-	GetDailyTotals(userID uuid.UUID, month, year int) ([]dto.DailyTotal, error)
+	// Laporan periode: semua rentang berbentuk [start, end).
+	GetTotalByType(userID uuid.UUID, txType string, start, end time.Time) (float64, error)
+	GetBreakdownByCategory(userID uuid.UUID, txType string, start, end time.Time) ([]dto.CategoryBreakdown, error)
+	GetDailyTotals(userID uuid.UUID, start, end time.Time) ([]dto.DailyTotal, error)
 
 	// Yearly
 	GetTotalByTypeYearly(userID uuid.UUID, txType string, year int) (float64, error)
@@ -28,19 +30,18 @@ func NewReportRepository(db *gorm.DB) ReportRepository {
 
 // ─── Monthly ──────────────────────────────────────────────────────────────────
 
-func (r *reportRepository) GetTotalByType(userID uuid.UUID, txType string, month, year int) (float64, error) {
+func (r *reportRepository) GetTotalByType(userID uuid.UUID, txType string, start, end time.Time) (float64, error) {
 	var total float64
 	err := r.db.Table("transactions").
 		Select("COALESCE(SUM(amount), 0)").
 		Where(`user_id = ? AND type = ?
-			AND EXTRACT(MONTH FROM transaction_date) = ?
-			AND EXTRACT(YEAR  FROM transaction_date) = ?
-			AND deleted_at IS NULL`, userID, txType, month, year).
+			AND transaction_date >= ? AND transaction_date < ?
+			AND deleted_at IS NULL`, userID, txType, day(start), day(end)).
 		Scan(&total).Error
 	return total, err
 }
 
-func (r *reportRepository) GetBreakdownByCategory(userID uuid.UUID, txType string, month, year int) ([]dto.CategoryBreakdown, error) {
+func (r *reportRepository) GetBreakdownByCategory(userID uuid.UUID, txType string, start, end time.Time) ([]dto.CategoryBreakdown, error) {
 	type rawRow struct {
 		CategoryID   uuid.UUID `gorm:"column:category_id"`
 		CategoryName string    `gorm:"column:category_name"`
@@ -52,9 +53,8 @@ func (r *reportRepository) GetBreakdownByCategory(userID uuid.UUID, txType strin
 		Select("t.category_id, c.name AS category_name, COALESCE(SUM(t.amount),0) AS total, COUNT(t.id) AS tx_count").
 		Joins("JOIN categories c ON c.id = t.category_id").
 		Where(`t.user_id = ? AND t.type = ?
-			AND EXTRACT(MONTH FROM t.transaction_date) = ?
-			AND EXTRACT(YEAR  FROM t.transaction_date) = ?
-			AND t.deleted_at IS NULL`, userID, txType, month, year).
+			AND t.transaction_date >= ? AND t.transaction_date < ?
+			AND t.deleted_at IS NULL`, userID, txType, day(start), day(end)).
 		Group("t.category_id, c.name").Order("total DESC").
 		Scan(&rows).Error
 	if err != nil {
@@ -65,7 +65,7 @@ func (r *reportRepository) GetBreakdownByCategory(userID uuid.UUID, txType strin
 	}), nil
 }
 
-func (r *reportRepository) GetDailyTotals(userID uuid.UUID, month, year int) ([]dto.DailyTotal, error) {
+func (r *reportRepository) GetDailyTotals(userID uuid.UUID, start, end time.Time) ([]dto.DailyTotal, error) {
 	type rawRow struct {
 		Date    string  `gorm:"column:date"`
 		Income  float64 `gorm:"column:income"`
@@ -77,9 +77,8 @@ func (r *reportRepository) GetDailyTotals(userID uuid.UUID, month, year int) ([]
 			COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END),0) AS income,
 			COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense`).
 		Where(`user_id = ?
-			AND EXTRACT(MONTH FROM transaction_date) = ?
-			AND EXTRACT(YEAR  FROM transaction_date) = ?
-			AND deleted_at IS NULL`, userID, month, year).
+			AND transaction_date >= ? AND transaction_date < ?
+			AND deleted_at IS NULL`, userID, day(start), day(end)).
 		Group("date").Order("date ASC").Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -89,6 +88,10 @@ func (r *reportRepository) GetDailyTotals(userID uuid.UUID, month, year int) ([]
 		result = append(result, dto.DailyTotal{Date: row.Date, Income: row.Income, Expense: row.Expense})
 	}
 	return result, nil
+}
+
+func day(t time.Time) string {
+	return t.Format("2006-01-02")
 }
 
 // ─── Yearly ───────────────────────────────────────────────────────────────────

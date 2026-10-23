@@ -68,60 +68,79 @@ func ensureNotTransferFee(tx *gorm.DB, transactionID uuid.UUID) error {
 	return nil
 }
 
+type createdTransaction struct {
+	ID     uuid.UUID
+	ledger *walletLedger
+	budget *budgetSnapshot
+}
+
+// createTransactionTx berjalan di dalam DB transaction milik pemanggil, sehingga
+// penjadwal transaksi berulang bisa mencatat transaksi dan memajukan jadwalnya
+// secara atomik.
+func createTransactionTx(tx *gorm.DB, userID uuid.UUID, req dto.CreateTransactionRequest, recurringID *uuid.UUID) (*createdTransaction, error) {
+	ledger, err := lockLedger(tx, userID, req.WalletID)
+	if err != nil {
+		return nil, err
+	}
+	if err := ledger.requireUsable(req.WalletID); err != nil {
+		return nil, err
+	}
+	if err := ensureCategory(tx, userID, req.CategoryID, req.Type); err != nil {
+		return nil, err
+	}
+
+	var budget *budgetSnapshot
+	if req.Type == "expense" {
+		if budget, err = snapshotBudget(tx, userID, req.CategoryID, req.Date); err != nil {
+			return nil, err
+		}
+	}
+
+	transaction := &model.Transaction{
+		UserID:          userID,
+		WalletID:        req.WalletID,
+		CategoryID:      req.CategoryID,
+		Amount:          req.Amount,
+		Type:            req.Type,
+		Note:            req.Note,
+		TransactionDate: req.Date,
+		RecurringID:     recurringID,
+	}
+	if err := repository.NewTransactionRepository(tx).Create(transaction); err != nil {
+		return nil, err
+	}
+	if err := ledger.apply(req.WalletID, deltaFromType(req.Type, req.Amount)); err != nil {
+		return nil, err
+	}
+
+	return &createdTransaction{ID: transaction.ID, ledger: ledger, budget: budget}, nil
+}
+
+func (a *Alerter) afterCreate(userID uuid.UUID, created *createdTransaction, t *model.Transaction) {
+	a.BalanceChanges(userID, created.ledger.changes())
+	a.BudgetUsage(userID, created.budget)
+	a.LargeTransaction(userID, t.Type, t.Amount, t.Category.Name)
+}
+
 func (s *transactionService) CreateTransaction(userID uuid.UUID, req dto.CreateTransactionRequest) (*dto.TransactionDetailResponse, error) {
-	var (
-		createdID uuid.UUID
-		ledger    *walletLedger
-		budget    *budgetSnapshot
-	)
+	var created *createdTransaction
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var err error
-		ledger, err = lockLedger(tx, userID, req.WalletID)
-		if err != nil {
-			return err
-		}
-		if err := ledger.requireUsable(req.WalletID); err != nil {
-			return err
-		}
-		if err := ensureCategory(tx, userID, req.CategoryID, req.Type); err != nil {
-			return err
-		}
-		if req.Type == "expense" {
-			if budget, err = snapshotBudget(tx, userID, req.CategoryID, req.Date); err != nil {
-				return err
-			}
-		}
-
-		transaction := &model.Transaction{
-			UserID:          userID,
-			WalletID:        req.WalletID,
-			CategoryID:      req.CategoryID,
-			Amount:          req.Amount,
-			Type:            req.Type,
-			Note:            req.Note,
-			TransactionDate: req.Date,
-		}
-		if err := repository.NewTransactionRepository(tx).Create(transaction); err != nil {
-			return err
-		}
-		createdID = transaction.ID
-
-		return ledger.apply(req.WalletID, deltaFromType(req.Type, req.Amount))
+		created, err = createTransactionTx(tx, userID, req, nil)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	created, err := s.transactionRepo.FindByID(createdID, userID)
+	t, err := s.transactionRepo.FindByID(created.ID, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	s.alerter.BalanceChanges(userID, ledger.changes())
-	s.alerter.BudgetUsage(userID, budget)
-	s.alerter.LargeTransaction(userID, created.Type, created.Amount, created.Category.Name)
-	return toDetailResponse(created), nil
+	s.alerter.afterCreate(userID, created, t)
+	return toDetailResponse(t), nil
 }
 
 func (s *transactionService) GetTransactionByID(userID uuid.UUID, id uuid.UUID) (*dto.TransactionDetailResponse, error) {
@@ -289,6 +308,7 @@ func (s *transactionService) DeleteTransaction(userID uuid.UUID, id uuid.UUID) e
 func toListResponse(t model.Transaction) dto.TransactionResponse {
 	return dto.TransactionResponse{
 		ID:           t.ID,
+		RecurringID:  t.RecurringID,
 		Amount:       t.Amount,
 		Type:         t.Type,
 		Note:         t.Note,
@@ -300,11 +320,12 @@ func toListResponse(t model.Transaction) dto.TransactionResponse {
 
 func toDetailResponse(t *model.Transaction) *dto.TransactionDetailResponse {
 	resp := &dto.TransactionDetailResponse{
-		ID:     t.ID,
-		Amount: t.Amount,
-		Type:   t.Type,
-		Note:   t.Note,
-		Date:   t.TransactionDate,
+		ID:          t.ID,
+		Amount:      t.Amount,
+		Type:        t.Type,
+		Note:        t.Note,
+		Date:        t.TransactionDate,
+		RecurringID: t.RecurringID,
 	}
 	resp.Wallet.ID = t.Wallet.ID
 	resp.Wallet.Name = t.Wallet.Name

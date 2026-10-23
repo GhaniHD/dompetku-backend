@@ -34,6 +34,7 @@ func (h *WalletHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		wallets.DELETE("/:id", h.DeleteWallet)
 		wallets.POST("/:id/adjust", h.AdjustBalance)
 		wallets.GET("/:id/adjustments", h.ListAdjustments)
+		wallets.GET("/:id/history", h.History)
 	}
 }
 
@@ -228,4 +229,31 @@ func (h *WalletHandler) ListAdjustments(c *gin.Context) {
 	}
 
 	successResponse(c, http.StatusOK, "riwayat penyesuaian saldo berhasil diambil", results)
+}
+
+// GET /api/wallets/:id/history?start_date=&end_date=&page=&limit=
+func (h *WalletHandler) History(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+	id, ok := walletIDParam(c)
+	if !ok {
+		return
+	}
+
+	var filter dto.WalletHistoryFilterRequest
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		errorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.walletService.History(userID, id, filter)
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+
+	successResponse(c, http.StatusOK, "riwayat dompet berhasil diambil", result)
 }

@@ -21,16 +21,54 @@ type WalletService interface {
 	GetTotalBalance(userID uuid.UUID) (float64, error)
 	Adjust(userID uuid.UUID, walletID uuid.UUID, req dto.AdjustBalanceRequest) (*dto.BalanceAdjustmentResponse, error)
 	ListAdjustments(userID uuid.UUID, walletID uuid.UUID) ([]dto.BalanceAdjustmentResponse, error)
+	History(userID uuid.UUID, walletID uuid.UUID, filter dto.WalletHistoryFilterRequest) (*dto.WalletHistoryResponse, error)
 }
 
 type walletService struct {
 	db             *gorm.DB
 	repo           repository.WalletRepository
 	adjustmentRepo repository.AdjustmentRepository
+	historyRepo    repository.HistoryRepository
 }
 
-func NewWalletService(db *gorm.DB, repo repository.WalletRepository, adjustmentRepo repository.AdjustmentRepository) WalletService {
-	return &walletService{db: db, repo: repo, adjustmentRepo: adjustmentRepo}
+func NewWalletService(
+	db *gorm.DB,
+	repo repository.WalletRepository,
+	adjustmentRepo repository.AdjustmentRepository,
+	historyRepo repository.HistoryRepository,
+) WalletService {
+	return &walletService{db: db, repo: repo, adjustmentRepo: adjustmentRepo, historyRepo: historyRepo}
+}
+
+const defaultHistoryLimit = 20
+
+func (s *walletService) History(userID uuid.UUID, walletID uuid.UUID, filter dto.WalletHistoryFilterRequest) (*dto.WalletHistoryResponse, error) {
+	wallet, err := s.repo.FindByID(walletID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	page, limit := filter.Page, filter.Limit
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = defaultHistoryLimit
+	}
+
+	entries, total, err := s.historyRepo.WalletHistory(walletID, wallet.OpeningBalance, filter, limit, (page-1)*limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.WalletHistoryResponse{
+		Wallet:         *toWalletResponse(wallet),
+		OpeningBalance: wallet.OpeningBalance,
+		Entries:        entries,
+		Total:          total,
+		Page:           page,
+		Limit:          limit,
+	}, nil
 }
 
 func roundMoney(v float64) float64 {
