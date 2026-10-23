@@ -29,6 +29,7 @@ func (h *ProfileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		profile.PUT("/password", h.ChangePassword)
 		profile.POST("/avatar", h.UploadAvatar)
 		profile.DELETE("", h.DeleteAccount)
+		profile.PUT("/budget-cycle", h.UpdateBudgetCycle)
 	}
 }
 
@@ -149,4 +150,27 @@ func (h *ProfileHandler) DeleteAccount(c *gin.Context) {
 	}
 
 	successResponse(c, http.StatusOK, "akun berhasil dihapus", nil)
+}
+
+// PUT /api/profile/budget-cycle
+func (h *ProfileHandler) UpdateBudgetCycle(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+
+	var req dto.UpdateBudgetCycleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	resp, err := h.profileService.UpdateBudgetCycle(c.Request.Context(), userID, &req)
+	if err != nil {
+		profileErrResponse(c, err)
+		return
+	}
+
+	successResponse(c, http.StatusOK, "siklus budget berhasil diperbarui", resp)
 }

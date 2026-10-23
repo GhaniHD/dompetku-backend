@@ -21,6 +21,11 @@ type ChangePasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
 }
 
+// UpdateBudgetCycleRequest digunakan untuk PUT /api/profile/budget-cycle
+type UpdateBudgetCycleRequest struct {
+	StartDay int `json:"start_day" binding:"required,min=1,max=31"`
+}
+
 // ─── Response DTOs ────────────────────────────────────────────────────────────
 
 // ProfileResponse adalah respons lengkap profil pengguna
@@ -30,6 +35,8 @@ type ProfileResponse struct {
 	Email     string    `json:"email"`
 	AvatarURL string    `json:"avatar_url"`
 	CreatedAt time.Time `json:"created_at"`
+
+	BudgetStartDay int `json:"budget_start_day"`
 
 	// Statistik ringkas (dihitung dari relasi)
 	TotalBalance float64 `json:"balance"`

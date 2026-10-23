@@ -29,6 +29,7 @@ func (h *BudgetHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		budgets.POST("", h.CreateBudget)
 		budgets.GET("", h.GetAllBudgets)
+		budgets.GET("/current", h.GetCurrentBudgets)
 		budgets.GET("/:id", h.GetBudgetByID)
 		budgets.PUT("/:id", h.UpdateBudget)
 		budgets.DELETE("/:id", h.DeleteBudget)
@@ -189,4 +190,21 @@ func (h *BudgetHandler) CopyBudget(c *gin.Context) {
 	}
 
 	successResponse(c, http.StatusCreated, "anggaran berhasil disalin", results)
+}
+
+// GET /api/budgets/current
+func (h *BudgetHandler) GetCurrentBudgets(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+
+	result, err := h.budgetService.GetCurrentBudgets(userID)
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+
+	successResponse(c, http.StatusOK, "anggaran periode berjalan berhasil diambil", result)
 }

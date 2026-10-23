@@ -18,6 +18,7 @@ type UserRepository interface {
 	// EmailTaken ikut menghitung akun yang sudah soft-delete karena unique index
 	// email di database masih memegang baris tersebut.
 	EmailTaken(ctx context.Context, email string) (bool, error)
+	BudgetStartDay(ctx context.Context, id uuid.UUID) (int, error)
 }
 
 type userRepository struct {
@@ -71,4 +72,14 @@ func (r *userRepository) EmailTaken(ctx context.Context, email string) (bool, er
 		Where("LOWER(email) = LOWER(?)", email).
 		Count(&count).Error
 	return count > 0, err
+}
+
+func (r *userRepository) BudgetStartDay(ctx context.Context, id uuid.UUID) (int, error) {
+	var day int
+	err := r.db.WithContext(ctx).
+		Model(&model.User{}).
+		Select("budget_start_day").
+		Where("id = ?", id).
+		Scan(&day).Error
+	return day, err
 }

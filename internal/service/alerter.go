@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"dompetku/internal/repository"
+	"dompetku/pkg/budgetcycle"
 	"fmt"
 	"time"
 
@@ -32,18 +34,29 @@ type budgetSnapshot struct {
 	CategoryID  uuid.UUID
 	Month       int
 	Year        int
+	Start       time.Time
+	End         time.Time
 	SpentBefore float64
 }
 
-// snapshotBudget mencatat pengeluaran kategori sebelum perubahan; dipanggil di
-// dalam DB transaction sebelum transaksi expense dibuat atau diubah.
+// snapshotBudget mencatat pengeluaran kategori pada periode budget yang memuat
+// tanggal transaksi (mengikuti tanggal mulai siklus user), sebelum perubahan.
+// Dipanggil di dalam DB transaction sebelum transaksi expense dibuat atau diubah.
 func snapshotBudget(tx *gorm.DB, userID, categoryID uuid.UUID, date time.Time) (*budgetSnapshot, error) {
-	month, year := int(date.Month()), date.Year()
-	spent, err := repository.NewBudgetRepository(tx).GetSpentByCategory(userID, categoryID, month, year)
+	startDay, err := repository.NewUserRepository(tx).BudgetStartDay(context.Background(), userID)
 	if err != nil {
 		return nil, err
 	}
-	return &budgetSnapshot{CategoryID: categoryID, Month: month, Year: year, SpentBefore: spent}, nil
+	startDay = budgetcycle.Normalize(startDay)
+
+	year, month := budgetcycle.PeriodOf(startDay, date)
+	start, end := budgetcycle.Period(startDay, year, month)
+
+	spent, err := repository.NewBudgetRepository(tx).GetSpentByCategory(userID, categoryID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetSnapshot{CategoryID: categoryID, Month: month, Year: year, Start: start, End: end, SpentBefore: spent}, nil
 }
 
 func (a *Alerter) BalanceChanges(userID uuid.UUID, changes []balanceChange) {
@@ -72,7 +85,7 @@ func (a *Alerter) BudgetUsage(userID uuid.UUID, snap *budgetSnapshot) {
 	if err != nil {
 		return
 	}
-	spent, err := a.budgetRepo.GetSpentByCategory(userID, snap.CategoryID, snap.Month, snap.Year)
+	spent, err := a.budgetRepo.GetSpentByCategory(userID, snap.CategoryID, snap.Start, snap.End)
 	if err != nil {
 		return
 	}

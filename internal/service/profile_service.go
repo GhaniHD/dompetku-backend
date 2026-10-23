@@ -14,6 +14,7 @@ import (
 	"dompetku/internal/dto"
 	"dompetku/internal/model"
 	"dompetku/internal/repository"
+	"dompetku/pkg/budgetcycle"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -34,6 +35,7 @@ type ProfileService interface {
 	ChangePassword(ctx context.Context, userID uuid.UUID, req *dto.ChangePasswordRequest) error
 	UploadAvatar(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (*dto.AvatarResponse, error)
 	DeleteAccount(ctx context.Context, userID uuid.UUID) error
+	UpdateBudgetCycle(ctx context.Context, userID uuid.UUID, req *dto.UpdateBudgetCycleRequest) (*dto.ProfileResponse, error)
 }
 
 type profileService struct {
@@ -73,6 +75,8 @@ func (s *profileService) buildResponse(ctx context.Context, user *model.User) (*
 		Email:        user.Email,
 		AvatarURL:    user.AvatarURL,
 		CreatedAt:    user.CreatedAt,
+
+		BudgetStartDay: budgetcycle.Normalize(user.BudgetStartDay),
 		TotalBalance: balance,
 		TotalTx:      txCount,
 		TotalWallet:  walletCount,
@@ -222,4 +226,12 @@ func (s *profileService) DeleteAccount(ctx context.Context, userID uuid.UUID) er
 	}
 
 	return s.profileRepo.DeleteAccount(ctx, userID)
+}
+// ─── UpdateBudgetCycle ────────────────────────────────────────────────────────
+
+func (s *profileService) UpdateBudgetCycle(ctx context.Context, userID uuid.UUID, req *dto.UpdateBudgetCycleRequest) (*dto.ProfileResponse, error) {
+	if err := s.profileRepo.UpdateBudgetStartDay(ctx, userID, req.StartDay); err != nil {
+		return nil, err
+	}
+	return s.GetProfile(ctx, userID)
 }
