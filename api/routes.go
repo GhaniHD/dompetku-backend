@@ -19,7 +19,7 @@ var Module = fx.Options(
 )
 
 func NewClaudeClient(cfg *config.AppConf) *claudepkg.Client {
-	return claudepkg.NewClient(cfg.ClaudeAPIKey)
+	return claudepkg.NewClient(cfg.ClaudeAPIKey, cfg.ClaudeModel, cfg.ClaudeAPIURL)
 }
 
 func NewRouter(

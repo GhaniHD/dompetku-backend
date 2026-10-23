@@ -5,7 +5,6 @@ import (
 	"dompetku/internal/model"
 	"dompetku/internal/repository"
 	"errors"
-	"fmt"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -22,21 +21,18 @@ type TransactionService interface {
 type transactionService struct {
 	db              *gorm.DB
 	transactionRepo repository.TransactionRepository
-	walletRepo      repository.WalletRepository
-	notifSvc        NotificationService
+	alerter         *Alerter
 }
 
 func NewTransactionService(
 	db *gorm.DB,
 	transactionRepo repository.TransactionRepository,
-	walletRepo repository.WalletRepository,
-	notifSvc NotificationService,
+	alerter *Alerter,
 ) TransactionService {
 	return &transactionService{
 		db:              db,
 		transactionRepo: transactionRepo,
-		walletRepo:      walletRepo,
-		notifSvc:        notifSvc,
+		alerter:         alerter,
 	}
 }
 
@@ -73,10 +69,15 @@ func ensureNotTransferFee(tx *gorm.DB, transactionID uuid.UUID) error {
 }
 
 func (s *transactionService) CreateTransaction(userID uuid.UUID, req dto.CreateTransactionRequest) (*dto.TransactionDetailResponse, error) {
-	var createdID uuid.UUID
+	var (
+		createdID uuid.UUID
+		ledger    *walletLedger
+		budget    *budgetSnapshot
+	)
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		ledger, err := lockLedger(tx, userID, req.WalletID)
+		var err error
+		ledger, err = lockLedger(tx, userID, req.WalletID)
 		if err != nil {
 			return err
 		}
@@ -85,6 +86,11 @@ func (s *transactionService) CreateTransaction(userID uuid.UUID, req dto.CreateT
 		}
 		if err := ensureCategory(tx, userID, req.CategoryID, req.Type); err != nil {
 			return err
+		}
+		if req.Type == "expense" {
+			if budget, err = snapshotBudget(tx, userID, req.CategoryID, req.Date); err != nil {
+				return err
+			}
 		}
 
 		transaction := &model.Transaction{
@@ -112,40 +118,10 @@ func (s *transactionService) CreateTransaction(userID uuid.UUID, req dto.CreateT
 		return nil, err
 	}
 
-	s.notifyAfterCreate(userID, created)
+	s.alerter.BalanceChanges(userID, ledger.changes())
+	s.alerter.BudgetUsage(userID, budget)
+	s.alerter.LargeTransaction(userID, created.Type, created.Amount, created.Category.Name)
 	return toDetailResponse(created), nil
-}
-
-func (s *transactionService) notifyAfterCreate(userID uuid.UUID, t *model.Transaction) {
-	wallet, err := s.walletRepo.FindByID(t.WalletID, userID)
-	if err == nil {
-		if wallet.Balance < 50_000 && wallet.Balance >= 0 {
-			_ = s.notifSvc.CreateSystem(userID,
-				"Saldo Hampir Habis ⚠️",
-				fmt.Sprintf("Saldo dompet \"%s\" tinggal Rp %.0f. Segera isi ulang.", wallet.Name, wallet.Balance),
-			)
-		}
-		if wallet.Balance < 0 {
-			_ = s.notifSvc.CreateSystem(userID,
-				"Saldo Minus ❗",
-				fmt.Sprintf("Saldo dompet \"%s\" minus Rp %.0f setelah transaksi terakhir.", wallet.Name, -wallet.Balance),
-			)
-		}
-	}
-
-	if t.Type == "expense" && t.Amount >= 500_000 {
-		_ = s.notifSvc.CreateSystem(userID,
-			"Pengeluaran Besar Tercatat 💸",
-			fmt.Sprintf("Pengeluaran sebesar Rp %.0f untuk kategori \"%s\" baru saja dicatat.", t.Amount, t.Category.Name),
-		)
-	}
-
-	if t.Type == "income" && t.Amount >= 1_000_000 {
-		_ = s.notifSvc.CreateSystem(userID,
-			"Pemasukan Masuk 💰",
-			fmt.Sprintf("Pemasukan sebesar Rp %.0f dari kategori \"%s\" berhasil dicatat.", t.Amount, t.Category.Name),
-		)
-	}
 }
 
 func (s *transactionService) GetTransactionByID(userID uuid.UUID, id uuid.UUID) (*dto.TransactionDetailResponse, error) {
@@ -173,6 +149,11 @@ func (s *transactionService) GetAllTransactions(userID uuid.UUID, filter dto.Tra
 }
 
 func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, req dto.UpdateTransactionRequest) (*dto.TransactionDetailResponse, error) {
+	var (
+		ledger *walletLedger
+		budget *budgetSnapshot
+	)
+
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		transactionRepo := repository.NewTransactionRepository(tx)
 
@@ -218,9 +199,14 @@ func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, r
 			}
 		}
 
-		ledger, err := lockLedger(tx, userID, oldWalletID, t.WalletID)
+		ledger, err = lockLedger(tx, userID, oldWalletID, t.WalletID)
 		if err != nil {
 			return err
+		}
+		if t.Type == "expense" {
+			if budget, err = snapshotBudget(tx, userID, t.CategoryID, t.TransactionDate); err != nil {
+				return err
+			}
 		}
 
 		if err := transactionRepo.Update(t); err != nil {
@@ -256,11 +242,16 @@ func (s *transactionService) UpdateTransaction(userID uuid.UUID, id uuid.UUID, r
 	if err != nil {
 		return nil, err
 	}
+
+	s.alerter.BalanceChanges(userID, ledger.changes())
+	s.alerter.BudgetUsage(userID, budget)
 	return toDetailResponse(updated), nil
 }
 
 func (s *transactionService) DeleteTransaction(userID uuid.UUID, id uuid.UUID) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	var ledger *walletLedger
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		transactionRepo := repository.NewTransactionRepository(tx)
 
 		t, err := transactionRepo.FindByID(id, userID)
@@ -274,7 +265,7 @@ func (s *transactionService) DeleteTransaction(userID uuid.UUID, id uuid.UUID) e
 			return err
 		}
 
-		ledger, err := lockLedger(tx, userID, t.WalletID)
+		ledger, err = lockLedger(tx, userID, t.WalletID)
 		if err != nil {
 			return err
 		}
@@ -287,6 +278,12 @@ func (s *transactionService) DeleteTransaction(userID uuid.UUID, id uuid.UUID) e
 
 		return ledger.apply(t.WalletID, -deltaFromType(t.Type, t.Amount))
 	})
+	if err != nil {
+		return err
+	}
+
+	s.alerter.BalanceChanges(userID, ledger.changes())
+	return nil
 }
 
 func toListResponse(t model.Transaction) dto.TransactionResponse {

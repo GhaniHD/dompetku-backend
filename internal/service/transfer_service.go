@@ -23,10 +23,11 @@ type TransferService interface {
 type transferService struct {
 	db           *gorm.DB
 	transferRepo repository.TransferRepository
+	alerter      *Alerter
 }
 
-func NewTransferService(db *gorm.DB, transferRepo repository.TransferRepository) TransferService {
-	return &transferService{db: db, transferRepo: transferRepo}
+func NewTransferService(db *gorm.DB, transferRepo repository.TransferRepository, alerter *Alerter) TransferService {
+	return &transferService{db: db, transferRepo: transferRepo, alerter: alerter}
 }
 
 func feeCategory(tx *gorm.DB, userID uuid.UUID) (*model.Category, error) {
@@ -42,10 +43,14 @@ func (s *transferService) Create(userID uuid.UUID, req dto.CreateTransferRequest
 		return nil, ErrTransferSameWallet
 	}
 
-	var createdID uuid.UUID
+	var (
+		createdID uuid.UUID
+		ledger    *walletLedger
+	)
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		ledger, err := lockLedger(tx, userID, req.FromWalletID, req.ToWalletID)
+		var err error
+		ledger, err = lockLedger(tx, userID, req.FromWalletID, req.ToWalletID)
 		if err != nil {
 			return err
 		}
@@ -98,6 +103,7 @@ func (s *transferService) Create(userID uuid.UUID, req dto.CreateTransferRequest
 		return nil, err
 	}
 
+	s.alerter.BalanceChanges(userID, ledger.changes())
 	return s.GetByID(userID, createdID)
 }
 
@@ -126,7 +132,9 @@ func (s *transferService) GetAll(userID uuid.UUID, filter dto.TransferFilterRequ
 }
 
 func (s *transferService) Delete(userID uuid.UUID, id uuid.UUID) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	var ledger *walletLedger
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		transferRepo := repository.NewTransferRepository(tx)
 
 		transfer, err := transferRepo.FindByID(id, userID)
@@ -137,7 +145,7 @@ func (s *transferService) Delete(userID uuid.UUID, id uuid.UUID) error {
 			return err
 		}
 
-		ledger, err := lockLedger(tx, userID, transfer.FromWalletID, transfer.ToWalletID)
+		ledger, err = lockLedger(tx, userID, transfer.FromWalletID, transfer.ToWalletID)
 		if err != nil {
 			return err
 		}
@@ -159,6 +167,12 @@ func (s *transferService) Delete(userID uuid.UUID, id uuid.UUID) error {
 		}
 		return ledger.apply(transfer.ToWalletID, -transfer.Amount)
 	})
+	if err != nil {
+		return err
+	}
+
+	s.alerter.BalanceChanges(userID, ledger.changes())
+	return nil
 }
 
 func toTransferResponse(t *model.Transfer) *dto.TransferResponse {

@@ -25,8 +25,9 @@ import (
 )
 
 var (
-	server *httptest.Server
-	gdb    *gorm.DB
+	server     *httptest.Server
+	gdb        *gorm.DB
+	fakeClaude *fakeClaudeServer
 )
 
 func TestMain(m *testing.M) {
@@ -58,6 +59,9 @@ func run(m *testing.M) (int, error) {
 		return 0, fmt.Errorf("ditolak: TEST_DB_NAME harus mengandung 'test' dan host bukan Supabase, karena database akan dikosongkan")
 	}
 
+	fakeClaude = newFakeClaudeServer()
+	defer fakeClaude.Close()
+
 	env := map[string]string{
 		"DB_HOST":        host,
 		"DB_PORT":        envOr("TEST_DB_PORT", "5432"),
@@ -66,8 +70,10 @@ func run(m *testing.M) (int, error) {
 		"DB_NAME":        name,
 		"DB_SSLMODE":     envOr("TEST_DB_SSLMODE", "disable"),
 		"JWT_SECRET":     "integration-test-secret-0123456789abcdef",
-		"CLAUDE_API_KEY": "",
+		"CLAUDE_API_KEY": "test-key",
+		"CLAUDE_API_URL": fakeClaude.URL,
 	}
+
 	for k, v := range env {
 		os.Setenv(k, v)
 	}

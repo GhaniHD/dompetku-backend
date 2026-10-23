@@ -14,5 +14,6 @@ services:
       - DB_SSLMODE=require
       - JWT_SECRET=${JWT_SECRET}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-20250514}
       - SERVER_PORT=8090
    

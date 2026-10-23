@@ -3,6 +3,7 @@ package repository
 
 import (
 	"dompetku/internal/dto"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -15,10 +16,11 @@ type AnalysisRepository interface {
 	GetExpenseByCategory(userID uuid.UUID, year int) ([]dto.CategoryShare, error)
 	// GetIncomeByCategory mengambil breakdown pemasukan per kategori dalam setahun
 	GetIncomeByCategory(userID uuid.UUID, year int) ([]dto.CategoryShare, error)
-	// GetLastNMonths mengambil summary N bulan terakhir (untuk bahan prediksi AI)
-	GetLastNMonths(userID uuid.UUID, n int) ([]dto.MonthSummary, error)
-	// GetTopCategories mengambil kategori pengeluaran terbesar N bulan terakhir
-	GetTopCategories(userID uuid.UUID, n int) ([]dto.CategoryBreakdown, error)
+	// GetMonthlySummaries: ringkasan per bulan dalam [start, end), bahan insight AI.
+	GetMonthlySummaries(userID uuid.UUID, start, end time.Time) ([]dto.MonthSummary, error)
+	// GetTopCategories: kategori pengeluaran terbesar dalam [start, end); persentase
+	// dihitung terhadap total pengeluaran periode tersebut.
+	GetTopCategories(userID uuid.UUID, start, end time.Time, limit int) ([]dto.CategoryBreakdown, error)
 }
 
 type analysisRepository struct {
@@ -121,7 +123,7 @@ func (r *analysisRepository) getCategoryShare(userID uuid.UUID, txType string, y
 	return result, nil
 }
 
-func (r *analysisRepository) GetLastNMonths(userID uuid.UUID, n int) ([]dto.MonthSummary, error) {
+func (r *analysisRepository) GetMonthlySummaries(userID uuid.UUID, start, end time.Time) ([]dto.MonthSummary, error) {
 	type rawRow struct {
 		Month   int     `gorm:"column:month"`
 		Year    int     `gorm:"column:year"`
@@ -134,19 +136,19 @@ func (r *analysisRepository) GetLastNMonths(userID uuid.UUID, n int) ([]dto.Mont
 			EXTRACT(YEAR  FROM transaction_date)::int AS year,
 			COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END),0) AS income,
 			COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense`).
-		Where("user_id = ? AND deleted_at IS NULL", userID).
+		Where("user_id = ? AND deleted_at IS NULL AND transaction_date >= ? AND transaction_date < ?",
+			userID, start.Format("2006-01-02"), end.Format("2006-01-02")).
 		Group("year, month").
-		Order("year DESC, month DESC").
-		Limit(n).Scan(&rows).Error
+		Order("year ASC, month ASC").
+		Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 
-	// Balik urutan agar dari yang terlama ke terbaru
 	result := make([]dto.MonthSummary, 0, len(rows))
-	for i := len(rows) - 1; i >= 0; i-- {
-		row := rows[i]
+	for _, row := range rows {
 		result = append(result, dto.MonthSummary{
+			Year:    row.Year,
 			Month:   row.Month,
 			Income:  row.Income,
 			Expense: row.Expense,
@@ -156,7 +158,7 @@ func (r *analysisRepository) GetLastNMonths(userID uuid.UUID, n int) ([]dto.Mont
 	return result, nil
 }
 
-func (r *analysisRepository) GetTopCategories(userID uuid.UUID, n int) ([]dto.CategoryBreakdown, error) {
+func (r *analysisRepository) GetTopCategories(userID uuid.UUID, start, end time.Time, limit int) ([]dto.CategoryBreakdown, error) {
 	type rawRow struct {
 		CategoryName string  `gorm:"column:category_name"`
 		Total        float64 `gorm:"column:total"`
@@ -164,20 +166,26 @@ func (r *analysisRepository) GetTopCategories(userID uuid.UUID, n int) ([]dto.Ca
 	}
 	var rows []rawRow
 
-	// Ambil data N bulan terakhir
+	from, to := start.Format("2006-01-02"), end.Format("2006-01-02")
+
 	err := r.db.Table("transactions t").
 		Select("c.name AS category_name, COALESCE(SUM(t.amount),0) AS total, COUNT(t.id) AS tx_count").
 		Joins("JOIN categories c ON c.id = t.category_id").
 		Where(`t.user_id = ? AND t.type = 'expense' AND t.deleted_at IS NULL
-			AND t.transaction_date >= NOW() - INTERVAL '6 months'`, userID).
-		Group("c.name").Order("total DESC").Limit(5).Scan(&rows).Error
+			AND t.transaction_date >= ? AND t.transaction_date < ?`, userID, from, to).
+		Group("c.id, c.name").Order("total DESC").Limit(limit).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 
 	var grand float64
-	for _, row := range rows {
-		grand += row.Total
+	err = r.db.Table("transactions").
+		Select("COALESCE(SUM(amount),0)").
+		Where(`user_id = ? AND type = 'expense' AND deleted_at IS NULL
+			AND transaction_date >= ? AND transaction_date < ?`, userID, from, to).
+		Scan(&grand).Error
+	if err != nil {
+		return nil, err
 	}
 
 	result := make([]dto.CategoryBreakdown, 0, len(rows))

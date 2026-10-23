@@ -18,6 +18,13 @@ type walletLedger struct {
 	repo    repository.WalletRepository
 	userID  uuid.UUID
 	wallets map[uuid.UUID]*model.Wallet
+	before  map[uuid.UUID]float64
+}
+
+type balanceChange struct {
+	Wallet model.Wallet
+	Before float64
+	After  float64
 }
 
 // lockLedger mengunci wallet selalu dalam urutan ID yang sama agar dua request
@@ -34,13 +41,19 @@ func lockLedger(tx *gorm.DB, userID uuid.UUID, ids ...uuid.UUID) (*walletLedger,
 	sort.Slice(unique, func(i, j int) bool { return unique[i].String() < unique[j].String() })
 
 	repo := repository.NewWalletRepository(tx)
-	ledger := &walletLedger{repo: repo, userID: userID, wallets: make(map[uuid.UUID]*model.Wallet, len(unique))}
+	ledger := &walletLedger{
+		repo:    repo,
+		userID:  userID,
+		wallets: make(map[uuid.UUID]*model.Wallet, len(unique)),
+		before:  make(map[uuid.UUID]float64, len(unique)),
+	}
 	for _, id := range unique {
 		wallet, err := repo.FindByIDForUpdate(id, userID)
 		if err != nil {
 			return nil, err
 		}
 		ledger.wallets[id] = wallet
+		ledger.before[id] = wallet.Balance
 	}
 	return ledger, nil
 }
@@ -74,4 +87,19 @@ func (l *walletLedger) apply(id uuid.UUID, delta float64) error {
 	}
 	w.Balance += delta
 	return nil
+}
+
+// changes mengembalikan saldo sebelum dan sesudah untuk wallet yang berubah,
+// dipakai notifikasi setelah DB transaction selesai.
+func (l *walletLedger) changes() []balanceChange {
+	if l == nil {
+		return nil
+	}
+	var out []balanceChange
+	for id, w := range l.wallets {
+		if before := l.before[id]; before != w.Balance {
+			out = append(out, balanceChange{Wallet: *w, Before: before, After: w.Balance})
+		}
+	}
+	return out
 }

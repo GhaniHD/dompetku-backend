@@ -31,6 +31,7 @@ type DailyTotal struct {
 
 // MonthSummary adalah ringkasan per bulan dalam laporan tahunan
 type MonthSummary struct {
+	Year    int     `json:"year,omitempty"`
 	Month   int     `json:"month"`
 	Income  float64 `json:"income"`
 	Expense float64 `json:"expense"`

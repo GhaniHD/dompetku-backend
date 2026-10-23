@@ -21,6 +21,8 @@ type AppConf struct {
 	JWTSecret    string
 	ServerPort   string
 	ClaudeAPIKey string
+	ClaudeModel  string
+	ClaudeAPIURL string
 }
 
 const minJWTSecretLength = 32
@@ -40,6 +42,8 @@ func NewAppConf() (*AppConf, error) {
 		JWTSecret:    os.Getenv("JWT_SECRET"),
 		ServerPort:   getEnv("PORT", getEnv("SERVER_PORT", "8090")),
 		ClaudeAPIKey: os.Getenv("CLAUDE_API_KEY"),
+		ClaudeModel:  getEnv("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+		ClaudeAPIURL: getEnv("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
 	}
 
 	if len(cfg.JWTSecret) < minJWTSecretLength {
