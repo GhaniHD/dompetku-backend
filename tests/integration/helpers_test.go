@@ -122,19 +122,47 @@ type testUser struct {
 
 func newUser(t *testing.T) testUser {
 	t.Helper()
+	u := registerPending(t, "Tester")
+	approveDirect(t, u.ID)
+	u.Token = login(t, u.Email, "rahasia123")
+	return u
+}
+
+// registerPending mendaftar tanpa undangan; akun menunggu persetujuan admin.
+func registerPending(t *testing.T, name string) testUser {
+	t.Helper()
 	email := fmt.Sprintf("user-%s@test.dompetku", uuid.NewString()[:8])
 	status, r := call(t, http.MethodPost, "/api/auth/register", "", map[string]any{
-		"name": "Tester", "email": email, "password": "rahasia123",
+		"name": name, "email": email, "password": "rahasia123",
 	})
 	expectStatus(t, status, http.StatusCreated, r)
-
 	data := decode[struct {
-		Token string `json:"token"`
-		User  struct {
+		Status string `json:"status"`
+		Token  string `json:"token"`
+		User   struct {
 			ID string `json:"id"`
 		} `json:"user"`
 	}](t, r)
-	return testUser{ID: data.User.ID, Email: email, Token: data.Token}
+	if data.Status != "pending" || data.Token != "" {
+		t.Fatalf("pendaftaran tanpa undangan harus pending tanpa token, dapat status %q", data.Status)
+	}
+	return testUser{ID: data.User.ID, Email: email}
+}
+
+func approveDirect(t *testing.T, userID string) {
+	t.Helper()
+	if err := gdb.Exec(`UPDATE users SET status = 'active' WHERE id = ?`, userID).Error; err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+}
+
+func login(t *testing.T, email, password string) string {
+	t.Helper()
+	status, out, err := tryCall(http.MethodPost, "/api/auth/login", "", map[string]any{"email": email, "password": password})
+	if err != nil || status != http.StatusOK || out.Token == "" {
+		t.Fatalf("login %s: status %d (%q)", email, status, out.Message)
+	}
+	return out.Token
 }
 
 func createWallet(t *testing.T, u testUser, name string, balance float64) string {

@@ -77,6 +77,8 @@ func (s *profileService) buildResponse(ctx context.Context, user *model.User) (*
 		CreatedAt: user.CreatedAt,
 
 		BudgetStartDay: budgetcycle.Normalize(user.BudgetStartDay),
+		Role:           user.Role,
+		Status:         user.Status,
 		TotalBalance:   balance,
 		TotalTx:        txCount,
 		TotalWallet:    walletCount,

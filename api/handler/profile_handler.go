@@ -2,6 +2,9 @@
 package handler
 
 import (
+	"dompetku/internal/repository"
+	"dompetku/pkg/config"
+	"dompetku/pkg/utils"
 	"errors"
 	"net/http"
 
@@ -13,10 +16,12 @@ import (
 
 type ProfileHandler struct {
 	profileService service.ProfileService
+	userRepo       repository.UserRepository
+	cfg            *config.AppConf
 }
 
-func NewProfileHandler(profileService service.ProfileService) *ProfileHandler {
-	return &ProfileHandler{profileService: profileService}
+func NewProfileHandler(profileService service.ProfileService, userRepo repository.UserRepository, cfg *config.AppConf) *ProfileHandler {
+	return &ProfileHandler{profileService: profileService, userRepo: userRepo, cfg: cfg}
 }
 
 // RegisterRoutes mendaftarkan semua route profil ke router group yang sudah
@@ -110,7 +115,18 @@ func (h *ProfileHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	successResponse(c, http.StatusOK, "password berhasil diubah", nil)
+	// Sesi lain berakhir setelah password diganti; perangkat ini diberi token baru.
+	user, err := h.userRepo.FindByID(c.Request.Context(), userID)
+	if err != nil {
+		errorResponse(c, http.StatusInternalServerError, "terjadi kesalahan internal")
+		return
+	}
+	token, err := utils.GenerateToken(user.ID, user.Email, h.cfg.JWTSecret, user.TokenVersion)
+	if err != nil {
+		errorResponse(c, http.StatusInternalServerError, "terjadi kesalahan internal")
+		return
+	}
+	successResponse(c, http.StatusOK, "password berhasil diubah", gin.H{"token": token})
 }
 
 // POST /api/profile/avatar

@@ -15,11 +15,33 @@ type User struct {
 	Password  string    `gorm:"type:text;not null"                              json:"-"`
 	AvatarURL string    `gorm:"type:varchar(255);default:''"                    json:"avatar_url"`
 	// BudgetStartDay: tanggal mulai siklus budget (tanggal gajian), 1-31.
-	BudgetStartDay int            `gorm:"type:smallint;not null;default:1" json:"budget_start_day"`
-	CreatedAt      time.Time      `gorm:"autoCreateTime"                                  json:"created_at"`
-	UpdatedAt      time.Time      `gorm:"autoUpdateTime"                                  json:"updated_at"`
-	DeletedAt      gorm.DeletedAt `gorm:"index"                                           json:"-"`
+	BudgetStartDay int `gorm:"type:smallint;not null;default:1" json:"budget_start_day"`
+
+	// Status akun: pending (menunggu admin), active, suspended, rejected.
+	// Default kolom "active" agar akun lama tetap bisa login setelah migrasi;
+	// pendaftaran baru diisi eksplisit oleh service.
+	Role         string         `gorm:"type:varchar(10);not null;default:'user'" json:"role"`
+	Status       string         `gorm:"type:varchar(12);not null;default:'active'" json:"status"`
+	StatusReason string         `gorm:"type:text;not null;default:''" json:"-"`
+	ApprovedAt   *time.Time     `json:"-"`
+	ApprovedBy   *uuid.UUID     `gorm:"type:uuid" json:"-"`
+	LastLoginAt  *time.Time     `json:"-"`
+	TokenVersion int            `gorm:"not null;default:0" json:"-"`
+	InviteID     *uuid.UUID     `gorm:"type:uuid" json:"-"`
+	CreatedAt    time.Time      `gorm:"autoCreateTime"                                  json:"created_at"`
+	UpdatedAt    time.Time      `gorm:"autoUpdateTime"                                  json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index"                                           json:"-"`
 }
+
+const (
+	RoleUser  = "user"
+	RoleAdmin = "admin"
+
+	UserPending   = "pending"
+	UserActive    = "active"
+	UserSuspended = "suspended"
+	UserRejected  = "rejected"
+)
 
 func (User) TableName() string {
 	return "users"

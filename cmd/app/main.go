@@ -57,6 +57,11 @@ func main() {
 		api.Module,
 
 		fx.Invoke(MigrateDB),
+		fx.Invoke(func(gdb *gorm.DB, cfg *config.AppConf) {
+			if err := service.EnsureAdmins(gdb, cfg.AdminEmails); err != nil {
+				log.Printf("[admin] gagal menetapkan admin dari ADMIN_EMAILS: %v", err)
+			}
+		}),
 		fx.Invoke(service.StartScheduler),
 		fx.Invoke(StartServer),
 	)

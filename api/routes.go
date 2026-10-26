@@ -36,12 +36,13 @@ func NewRouter(
 	exportHandler *handler.ExportHandler,
 	recurringHandler *handler.RecurringHandler,
 	debtGoalHandler *handler.DebtGoalHandler,
+	adminHandler *handler.AdminHandler,
 	userRepo repository.UserRepository,
 	cfg *config.AppConf,
 ) *gin.Engine {
 	r := gin.Default()
 
-	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.CORSMiddleware(cfg))
 	r.Static("/uploads", "./uploads")
 
 	r.GET("/health", func(c *gin.Context) {
@@ -52,6 +53,8 @@ func NewRouter(
 	{
 		auth.POST("/register", authHandler.Register)
 		auth.POST("/login", authHandler.Login)
+		auth.GET("/invite/:code", authHandler.CheckInvite)
+		auth.POST("/reset-password", authHandler.ResetPassword)
 	}
 
 	protected := r.Group("/api")
@@ -69,6 +72,7 @@ func NewRouter(
 		exportHandler.RegisterRoutes(protected)
 		recurringHandler.RegisterRoutes(protected)
 		debtGoalHandler.RegisterRoutes(protected)
+		adminHandler.RegisterRoutes(protected.Group("/admin", middleware.RequireAdmin()))
 	}
 
 	return r

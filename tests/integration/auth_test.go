@@ -16,14 +16,16 @@ func TestRegisterNormalizesEmail(t *testing.T) {
 	expectStatus(t, status, http.StatusCreated, r)
 
 	want := strings.ToLower(strings.TrimSpace(raw))
-	got := decode[struct {
+	data := decode[struct {
 		User struct {
+			ID    string `json:"id"`
 			Email string `json:"email"`
 		} `json:"user"`
-	}](t, r).User.Email
-	if got != want {
-		t.Fatalf("email tersimpan %q, ingin %q", got, want)
+	}](t, r)
+	if data.User.Email != want {
+		t.Fatalf("email tersimpan %q, ingin %q", data.User.Email, want)
 	}
+	approveDirect(t, data.User.ID)
 
 	status, r = call(t, http.MethodPost, "/api/auth/login", "", map[string]any{
 		"email": strings.ToUpper(want), "password": "rahasia123",
@@ -114,6 +116,14 @@ func TestChangePasswordWrongOldPasswordIsBadRequest(t *testing.T) {
 	status, r = call(t, http.MethodPut, "/api/profile/password", u.Token, map[string]any{
 		"old_password": "rahasia123", "new_password": "rahasia456",
 	})
+	expectStatus(t, status, http.StatusOK, r)
+	fresh := decode[struct {
+		Token string `json:"token"`
+	}](t, r).Token
+
+	status, r = call(t, http.MethodGet, "/api/wallets", u.Token, nil)
+	expectStatus(t, status, http.StatusUnauthorized, r)
+	status, r = call(t, http.MethodGet, "/api/wallets", fresh, nil)
 	expectStatus(t, status, http.StatusOK, r)
 
 	status, r = call(t, http.MethodPost, "/api/auth/login", "", map[string]any{"email": u.Email, "password": "rahasia456"})

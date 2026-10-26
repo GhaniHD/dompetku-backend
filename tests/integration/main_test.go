@@ -74,6 +74,7 @@ func run(m *testing.M) (int, error) {
 		"JWT_SECRET":     "integration-test-secret-0123456789abcdef",
 		"CLAUDE_API_KEY": "test-key",
 		"CLAUDE_API_URL": fakeClaude.URL,
+		"ADMIN_EMAILS":   "admin@test.dompetku",
 	}
 
 	for k, v := range env {

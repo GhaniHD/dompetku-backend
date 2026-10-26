@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"go.uber.org/fx"
@@ -23,6 +24,8 @@ type AppConf struct {
 	ClaudeAPIKey string
 	ClaudeModel  string
 	ClaudeAPIURL string
+	AdminEmails  []string
+	CORSOrigins  []string
 }
 
 const minJWTSecretLength = 32
@@ -44,6 +47,8 @@ func NewAppConf() (*AppConf, error) {
 		ClaudeAPIKey: os.Getenv("CLAUDE_API_KEY"),
 		ClaudeModel:  getEnv("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
 		ClaudeAPIURL: getEnv("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
+		AdminEmails:  splitList(os.Getenv("ADMIN_EMAILS"), true),
+		CORSOrigins:  splitList(getEnv("CORS_ORIGINS", "http://localhost:5173,https://dompetku-new.vercel.app"), false),
 	}
 
 	if len(cfg.JWTSecret) < minJWTSecretLength {
@@ -59,4 +64,28 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func splitList(raw string, lower bool) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if lower {
+			part = strings.ToLower(part)
+		}
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func (c *AppConf) IsAdminEmail(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	for _, e := range c.AdminEmails {
+		if e == email {
+			return true
+		}
+	}
+	return false
 }
