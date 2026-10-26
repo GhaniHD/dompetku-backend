@@ -16,6 +16,10 @@ type User struct {
 	AvatarURL string    `gorm:"type:varchar(255);default:''"                    json:"avatar_url"`
 	// BudgetStartDay: tanggal mulai siklus budget (tanggal gajian), 1-31.
 	BudgetStartDay int `gorm:"type:smallint;not null;default:1" json:"budget_start_day"`
+	// IncomeType: salary (gaji tetap, periode ikut tanggal gajian) atau
+	// irregular (tidak tetap/belum bekerja, periode = bulan kalender).
+	IncomeType    string     `gorm:"type:varchar(12);not null;default:'salary'" json:"income_type"`
+	IncomeSetupAt *time.Time `json:"-"`
 
 	// Status akun: pending (menunggu admin), active, suspended, rejected.
 	// Default kolom "active" agar akun lama tetap bisa login setelah migrasi;
@@ -34,6 +38,9 @@ type User struct {
 }
 
 const (
+	IncomeSalary    = "salary"
+	IncomeIrregular = "irregular"
+
 	RoleUser  = "user"
 	RoleAdmin = "admin"
 

@@ -35,6 +35,7 @@ func (h *ProfileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		profile.POST("/avatar", h.UploadAvatar)
 		profile.DELETE("", h.DeleteAccount)
 		profile.PUT("/budget-cycle", h.UpdateBudgetCycle)
+		profile.PUT("/income", h.UpdateIncome)
 	}
 }
 
@@ -166,6 +167,29 @@ func (h *ProfileHandler) DeleteAccount(c *gin.Context) {
 	}
 
 	successResponse(c, http.StatusOK, "akun berhasil dihapus", nil)
+}
+
+// PUT /api/profile/income
+func (h *ProfileHandler) UpdateIncome(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+
+	var req dto.UpdateIncomeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "jenis pemasukan harus salary atau irregular, tanggal 1 sampai 31")
+		return
+	}
+
+	resp, err := h.profileService.UpdateIncome(c.Request.Context(), userID, &req)
+	if err != nil {
+		profileErrResponse(c, err)
+		return
+	}
+
+	successResponse(c, http.StatusOK, "jenis pemasukan berhasil diperbarui", resp)
 }
 
 // PUT /api/profile/budget-cycle

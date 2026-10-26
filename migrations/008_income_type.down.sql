@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_income_type_check;
+ALTER TABLE users DROP COLUMN IF EXISTS income_setup_at;
+ALTER TABLE users DROP COLUMN IF EXISTS income_type;
+
+COMMIT;

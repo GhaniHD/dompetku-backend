@@ -36,6 +36,7 @@ type ProfileService interface {
 	UploadAvatar(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (*dto.AvatarResponse, error)
 	DeleteAccount(ctx context.Context, userID uuid.UUID) error
 	UpdateBudgetCycle(ctx context.Context, userID uuid.UUID, req *dto.UpdateBudgetCycleRequest) (*dto.ProfileResponse, error)
+	UpdateIncome(ctx context.Context, userID uuid.UUID, req *dto.UpdateIncomeRequest) (*dto.ProfileResponse, error)
 }
 
 type profileService struct {
@@ -76,12 +77,14 @@ func (s *profileService) buildResponse(ctx context.Context, user *model.User) (*
 		AvatarURL: user.AvatarURL,
 		CreatedAt: user.CreatedAt,
 
-		BudgetStartDay: budgetcycle.Normalize(user.BudgetStartDay),
-		Role:           user.Role,
-		Status:         user.Status,
-		TotalBalance:   balance,
-		TotalTx:        txCount,
-		TotalWallet:    walletCount,
+		BudgetStartDay:  budgetcycle.Normalize(user.BudgetStartDay),
+		IncomeType:      incomeTypeOf(user),
+		IncomeSetupDone: user.IncomeSetupAt != nil,
+		Role:            user.Role,
+		Status:          user.Status,
+		TotalBalance:    balance,
+		TotalTx:         txCount,
+		TotalWallet:     walletCount,
 	}, nil
 }
 
@@ -228,6 +231,33 @@ func (s *profileService) DeleteAccount(ctx context.Context, userID uuid.UUID) er
 	}
 
 	return s.profileRepo.DeleteAccount(ctx, userID)
+}
+
+func incomeTypeOf(user *model.User) string {
+	if user.IncomeType == model.IncomeIrregular {
+		return model.IncomeIrregular
+	}
+	return model.IncomeSalary
+}
+
+// ─── UpdateIncome ─────────────────────────────────────────────────────────────
+
+func (s *profileService) UpdateIncome(ctx context.Context, userID uuid.UUID, req *dto.UpdateIncomeRequest) (*dto.ProfileResponse, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil || user == nil {
+		return nil, ErrUserNotFound
+	}
+	day := req.StartDay
+	switch {
+	case req.IncomeType == model.IncomeIrregular:
+		day = 1
+	case day == 0:
+		day = budgetcycle.Normalize(user.BudgetStartDay)
+	}
+	if err := s.profileRepo.UpdateIncome(ctx, userID, req.IncomeType, day); err != nil {
+		return nil, err
+	}
+	return s.GetProfile(ctx, userID)
 }
 
 // ─── UpdateBudgetCycle ────────────────────────────────────────────────────────

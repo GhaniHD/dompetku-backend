@@ -6,6 +6,7 @@ import (
 	"dompetku/internal/model"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -20,6 +21,7 @@ type ProfileRepository interface {
 	UpdateAvatar(ctx context.Context, id uuid.UUID, avatarURL string) (*model.User, error)
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	UpdateBudgetStartDay(ctx context.Context, id uuid.UUID, day int) error
+	UpdateIncome(ctx context.Context, id uuid.UUID, incomeType string, day int) error
 
 	// Statistik
 	SumWalletBalance(ctx context.Context, userID uuid.UUID) (float64, error)
@@ -136,6 +138,13 @@ func (r *profileRepository) EmailExistsExcept(ctx context.Context, email string,
 		Count(&count).Error
 	return count > 0, err
 }
+func (r *profileRepository) UpdateIncome(ctx context.Context, id uuid.UUID, incomeType string, day int) error {
+	return r.db.WithContext(ctx).
+		Model(&model.User{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"income_type": incomeType, "budget_start_day": day, "income_setup_at": time.Now()}).Error
+}
+
 func (r *profileRepository) UpdateBudgetStartDay(ctx context.Context, id uuid.UUID, day int) error {
 	return r.db.WithContext(ctx).
 		Model(&model.User{}).

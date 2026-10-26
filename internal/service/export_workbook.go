@@ -593,7 +593,7 @@ func renderSummary(sh *sheet, d *reportData, period string, flows map[uuid.UUID]
 		{"Pindahan", "Pindahan uang antar dompet beserta biaya adminnya."},
 		{"Per Kategori", "Jumlah, total, rata-rata, terbesar, dan terkecil per kategori."},
 		{"Harian & Bulanan", "Pemasukan dan pengeluaran per hari dan per bulan, lengkap dengan grafik."},
-		{"Anggaran", "Batas, pemakaian, dan sisa anggaran setiap periode gajian yang beririsan dengan laporan."},
+		{"Anggaran", "Batas, pemakaian, dan sisa anggaran setiap periode anggaran yang beririsan dengan laporan."},
 		{"Hutang & Piutang", "Posisi seluruh hutang/piutang saat ini dan pembayaran dalam periode."},
 		{"Target Tabungan & Transaksi Rutin", "Kondisi target tabungan dan jadwal transaksi rutin saat laporan dibuat."},
 	}
@@ -856,7 +856,11 @@ func renderMonthly(sh *sheet, d *reportData, period string, txs []repository.Exp
 }
 
 func renderBudgets(sh *sheet, d *reportData) {
-	sh.heading("Anggaran", fmt.Sprintf("Periode anggaran mengikuti tanggal gajian %d. Pemakaian dihitung untuk seluruh periode anggaran.", d.BudgetCycleD))
+	basis := fmt.Sprintf("Periode anggaran mengikuti tanggal gajian %d.", d.BudgetCycleD)
+	if d.BudgetCycleD == 1 {
+		basis = "Periode anggaran mengikuti bulan kalender."
+	}
+	sh.heading("Anggaran", basis+" Pemakaian dihitung untuk seluruh periode anggaran.")
 	statusLabel := map[string]string{"on_track": "Aman", "warning": "Hampir habis", "over_budget": "Terlampaui"}
 	var rows [][]any
 	var statuses []string
