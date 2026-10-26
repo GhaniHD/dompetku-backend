@@ -69,4 +69,35 @@ type BudgetSummaryResponse struct {
 	TotalSpent  float64          `json:"total_spent"`
 	TotalRemain float64          `json:"total_remain"`
 	Budgets     []BudgetResponse `json:"budgets"`
+
+	Savings          []SavingsPlanResponse `json:"savings"`
+	SavingsPlanned   float64               `json:"savings_planned"`
+	SavingsDeposited float64               `json:"savings_deposited"`
+	// FreeMoney hanya diisi untuk periode yang sedang berjalan.
+	FreeMoney *FreeMoneyResponse `json:"free_money,omitempty"`
+}
+
+// SavingsPlanResponse adalah satu target tabungan sebagai baris anggaran.
+// Planned dihitung dari sisa target di awal periode dibagi sisa bulan ke tenggat;
+// 0 bila target tidak punya tenggat. Deposited = perubahan saldo dompet target
+// selama periode.
+type SavingsPlanResponse struct {
+	GoalID     uuid.UUID `json:"goal_id"`
+	Name       string    `json:"name"`
+	WalletID   uuid.UUID `json:"wallet_id"`
+	WalletName string    `json:"wallet_name"`
+	Planned    float64   `json:"planned"`
+	Deposited  float64   `json:"deposited"`
+	Remain     float64   `json:"remain"`
+	Deadline   *string   `json:"deadline"`
+	Achieved   bool      `json:"achieved"`
+}
+
+// FreeMoneyResponse: uang yang benar-benar bebas dipakai setelah menyisihkan
+// sisa anggaran pengeluaran dan sisa setoran tabungan periode ini.
+type FreeMoneyResponse struct {
+	Spendable   float64 `json:"spendable"`
+	BudgetLeft  float64 `json:"budget_left"`
+	SavingsLeft float64 `json:"savings_left"`
+	Amount      float64 `json:"amount"`
 }
