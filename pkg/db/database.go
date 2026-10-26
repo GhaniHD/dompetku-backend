@@ -4,6 +4,7 @@ import (
 	"dompetku/pkg/config"
 	"fmt"
 	"log"
+	"time"
 
 	"go.uber.org/fx"
 	"gorm.io/driver/postgres"
@@ -15,7 +16,6 @@ var DB *gorm.DB
 var Module = fx.Options(fx.Provide(ConnectDB))
 
 func ConnectDB(conf *config.AppConf) (*gorm.DB, error) {
-	// Implementation for connecting to the database
 	dsn := fmt.Sprintf(
 		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=Asia/Jakarta",
 		conf.DBHost,
@@ -31,6 +31,19 @@ func ConnectDB(conf *config.AppConf) (*gorm.DB, error) {
 		PreferSimpleProtocol: true,
 	}), &gorm.Config{})
 	if err != nil {
+		return nil, err
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	// Koneksi dipakai ulang agar request paralel tidak membuka koneksi TLS baru ke database.
+	sqlDB.SetMaxOpenConns(10)
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	if err := sqlDB.Ping(); err != nil {
 		return nil, err
 	}
 
