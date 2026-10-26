@@ -181,3 +181,73 @@ func TestExportXLSXValidation(t *testing.T) {
 		}
 	}
 }
+
+func downloadSingle(t *testing.T, u testUser, path, query string) *excelize.File {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/api/export/"+path+query, nil)
+	req.Header.Set("Authorization", "Bearer "+u.Token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("%s status %d: %s", path, res.StatusCode, raw)
+	}
+	if cd := res.Header.Get("Content-Disposition"); !strings.Contains(cd, ".xlsx") {
+		t.Fatalf("content-disposition %q", cd)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("file bukan xlsx valid: %v", err)
+	}
+	return f
+}
+
+func TestExportSingleSheets(t *testing.T) {
+	u := newUser(t)
+	bca := createTypedWallet(t, u, "BCA", "bank", 1_000_000)
+	cash := createWallet(t, u, "Tunai", 0)
+	salary := createCategory(t, u, "Gaji", "income")
+	food := createCategory(t, u, "Makan", "expense")
+
+	incomeOn(t, u, bca, salary, 5_000_000, "2026-10-01")
+	expenseOn(t, u, bca, food, 75_000, "2026-10-02")
+	transferOn(t, u, bca, cash, 200_000, 2_500, "2026-10-03")
+	expenseOn(t, u, cash, food, 30_000, "2026-11-02")
+
+	f := downloadSingle(t, u, "transactions.xlsx", "?start=2026-10-01&end=2026-10-31")
+	defer f.Close()
+	if got := f.GetSheetList(); len(got) != 1 || got[0] != "Transaksi" {
+		t.Fatalf("sheet %v, ingin hanya Transaksi", got)
+	}
+	txs := tableRows(t, f, "Transaksi", "Transaksi")
+	if len(txs) != 3 {
+		t.Fatalf("%d transaksi, ingin 3 (gaji, makan, biaya admin)", len(txs))
+	}
+	formula, _ := f.GetCellFormula("Transaksi", "C4")
+	if !strings.Contains(formula, "SUBTOTAL(109,Transaksi[Pemasukan])") {
+		t.Fatalf("ringkasan pemasukan bukan SUBTOTAL: %q", formula)
+	}
+
+	g := downloadSingle(t, u, "transfers.xlsx", "?start=2026-10-01&end=2026-10-31")
+	defer g.Close()
+	moves := tableRows(t, g, "Pindahan", "Pindahan")
+	if len(moves) != 1 || moves[0]["Dari dompet"] != "BCA" || moves[0]["Ke dompet"] != "Tunai" || moves[0]["Biaya admin"] != "2500" {
+		t.Fatalf("pindahan %v", moves)
+	}
+
+	empty := downloadSingle(t, u, "transfers.xlsx", "?start=2026-12-01&end=2026-12-31")
+	defer empty.Close()
+	if rows := tableRows(t, empty, "Pindahan", "Pindahan"); len(rows) != 1 || rows[0]["No"] != "Tidak ada data pada periode ini" {
+		t.Fatalf("periode kosong %v", rows)
+	}
+
+	other := newUser(t)
+	o := downloadSingle(t, other, "transactions.xlsx", "?start=2026-10-01&end=2026-10-31")
+	defer o.Close()
+	if rows := tableRows(t, o, "Transaksi", "Transaksi"); len(rows) != 1 || rows[0]["No"] != "Tidak ada data pada periode ini" {
+		t.Fatalf("transaksi user lain ikut terekspor: %v", rows)
+	}
+}

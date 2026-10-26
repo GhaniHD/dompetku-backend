@@ -13,6 +13,7 @@ import (
 	"dompetku/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
 )
 
 type ExportHandler struct {
@@ -31,6 +32,8 @@ func (h *ExportHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		export.GET("/transactions.csv", h.Transactions)
 		export.GET("/transfers.csv", h.Transfers)
 		export.GET("/report.xlsx", h.Report)
+		export.GET("/transactions.xlsx", h.single(service.SheetTransactions))
+		export.GET("/transfers.xlsx", h.single(service.SheetTransfers))
 	}
 }
 
@@ -135,15 +138,8 @@ func (h *ExportHandler) Transfers(c *gin.Context) {
 		[]string{"tanggal", "dari", "ke", "nominal", "biaya_admin", "catatan"}, rows)
 }
 
-// GET /api/export/report.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD
-// Tanpa parameter: periode gajian yang sedang berjalan.
-func (h *ExportHandler) Report(c *gin.Context) {
-	userID, ok := getUserID(c)
-	if !ok {
-		unauthorizedResponse(c)
-		return
-	}
-
+// parseRange membaca ?start=YYYY-MM-DD&end=YYYY-MM-DD; parameter kosong berarti periode gajian berjalan.
+func parseRange(c *gin.Context) (start, end *time.Time, ok bool) {
 	parse := func(key string) (*time.Time, bool) {
 		v := c.Query(key)
 		if v == "" {
@@ -156,16 +152,14 @@ func (h *ExportHandler) Report(c *gin.Context) {
 		}
 		return &t, true
 	}
-	start, ok := parse("start")
-	if !ok {
-		return
+	if start, ok = parse("start"); !ok {
+		return nil, nil, false
 	}
-	end, ok := parse("end")
-	if !ok {
-		return
-	}
+	end, ok = parse("end")
+	return start, end, ok
+}
 
-	f, filename, err := h.exportService.Workbook(userID, start, end)
+func writeXLSX(c *gin.Context, f *excelize.File, filename string, err error) {
 	if err != nil {
 		if errors.Is(err, service.ErrExportRange) || errors.Is(err, service.ErrExportTooLarge) {
 			errorResponse(c, http.StatusBadRequest, err.Error())
@@ -181,5 +175,37 @@ func (h *ExportHandler) Report(c *gin.Context) {
 	c.Status(http.StatusOK)
 	if _, err := f.WriteTo(c.Writer); err != nil {
 		log.Printf("[export xlsx] %v", err)
+	}
+}
+
+// GET /api/export/report.xlsx?start=YYYY-MM-DD&end=YYYY-MM-DD
+func (h *ExportHandler) Report(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+	start, end, ok := parseRange(c)
+	if !ok {
+		return
+	}
+	f, filename, err := h.exportService.Workbook(userID, start, end)
+	writeXLSX(c, f, filename, err)
+}
+
+// GET /api/export/transactions.xlsx dan /api/export/transfers.xlsx dengan query yang sama seperti report.xlsx.
+func (h *ExportHandler) single(kind string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, ok := getUserID(c)
+		if !ok {
+			unauthorizedResponse(c)
+			return
+		}
+		start, end, ok := parseRange(c)
+		if !ok {
+			return
+		}
+		f, filename, err := h.exportService.SingleSheet(userID, kind, start, end)
+		writeXLSX(c, f, filename, err)
 	}
 }
