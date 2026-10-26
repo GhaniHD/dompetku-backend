@@ -32,6 +32,9 @@ type budgetService struct {
 	categoryRepo repository.CategoryRepository
 	userRepo     repository.UserRepository
 	notifSvc     NotificationService
+	goalRepo     repository.GoalRepository
+	walletRepo   repository.WalletRepository
+	exportRepo   repository.ExportRepository
 	now          func() time.Time
 }
 
@@ -40,12 +43,18 @@ func NewBudgetService(
 	categoryRepo repository.CategoryRepository,
 	userRepo repository.UserRepository,
 	notifSvc NotificationService,
+	goalRepo repository.GoalRepository,
+	walletRepo repository.WalletRepository,
+	exportRepo repository.ExportRepository,
 ) BudgetService {
 	return &budgetService{
 		budgetRepo:   budgetRepo,
 		categoryRepo: categoryRepo,
 		userRepo:     userRepo,
 		notifSvc:     notifSvc,
+		goalRepo:     goalRepo,
+		walletRepo:   walletRepo,
+		exportRepo:   exportRepo,
 		now:          time.Now,
 	}
 }
@@ -186,6 +195,12 @@ func (s *budgetService) GetAllBudgets(userID uuid.UUID, filter dto.BudgetFilterR
 	}
 	if filter.Month > 0 && filter.Year > 0 {
 		summary.PeriodStart, summary.PeriodEnd = periodLabels(day, filter.Year, filter.Month)
+		if err := s.addSavingsPlan(userID, day, summary); err != nil {
+			return nil, err
+		}
+	}
+	if summary.Savings == nil {
+		summary.Savings = []dto.SavingsPlanResponse{}
 	}
 
 	return summary, nil
