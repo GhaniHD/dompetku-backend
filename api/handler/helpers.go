@@ -60,7 +60,9 @@ func serviceErrorResponse(c *gin.Context, err error) {
 		errors.Is(err, service.ErrRecurringNotFound),
 		errors.Is(err, service.ErrDebtNotFound),
 		errors.Is(err, service.ErrDebtPaymentNotFound),
-		errors.Is(err, service.ErrGoalNotFound):
+		errors.Is(err, service.ErrGoalNotFound),
+		errors.Is(err, service.ErrAdminUserNotFound),
+		errors.Is(err, service.ErrInviteNotFound):
 		errorResponse(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrCategoryTypeMismatch),
 		errors.Is(err, service.ErrBudgetCategoryNotExpense),
@@ -76,8 +78,11 @@ func serviceErrorResponse(c *gin.Context, err error) {
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrTransactionIsTransferFee),
 		errors.Is(err, service.ErrWalletNotEmpty),
-		errors.Is(err, service.ErrGoalWalletTaken):
+		errors.Is(err, service.ErrGoalWalletTaken),
+		errors.Is(err, service.ErrAdminInvalidStatus):
 		errorResponse(c, http.StatusConflict, err.Error())
+	case errors.Is(err, service.ErrAdminProtected):
+		errorResponse(c, http.StatusForbidden, err.Error())
 	default:
 		log.Printf("[%s %s] %v", c.Request.Method, c.FullPath(), err)
 		errorResponse(c, http.StatusInternalServerError, "terjadi kesalahan internal")

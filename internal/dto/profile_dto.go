@@ -36,7 +36,9 @@ type ProfileResponse struct {
 	AvatarURL string    `json:"avatar_url"`
 	CreatedAt time.Time `json:"created_at"`
 
-	BudgetStartDay int `json:"budget_start_day"`
+	BudgetStartDay int    `json:"budget_start_day"`
+	Role           string `json:"role"`
+	Status         string `json:"status"`
 
 	// Statistik ringkas (dihitung dari relasi)
 	TotalBalance float64 `json:"balance"`

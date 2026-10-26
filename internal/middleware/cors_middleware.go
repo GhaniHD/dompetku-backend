@@ -1,19 +1,18 @@
 package middleware
 
 import (
+	"dompetku/pkg/config"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 // CORSMiddleware mengkonfigurasi Cross-Origin Resource Sharing
 // Mengembalikan gin.HandlerFunc sebagai pengganti *cors.Cors dari rs/cors
-func CORSMiddleware() gin.HandlerFunc {
+func CORSMiddleware(cfg *config.AppConf) gin.HandlerFunc {
 	return cors.New(cors.Config{
 		// Daftar origin yang diizinkan mengakses API
-		AllowOrigins: []string{
-			"http://localhost:5173",
-			"https://dompetku-new.vercel.app",
-		},
+		AllowOrigins: cfg.CORSOrigins,
 
 		// Method HTTP yang diizinkan
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},

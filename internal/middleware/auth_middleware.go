@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"dompetku/internal/model"
 	"dompetku/internal/repository"
 	"dompetku/pkg/config"
 	"dompetku/pkg/utils"
@@ -42,7 +43,8 @@ func AuthMiddleware(cfg *config.AppConf, userRepo repository.UserRepository) gin
 			return
 		}
 
-		if _, err := userRepo.FindByID(c.Request.Context(), claims.UserID); err != nil {
+		user, err := userRepo.FindByID(c.Request.Context(), claims.UserID)
+		if err != nil {
 			if errors.Is(err, repository.ErrUserNotFound) {
 				abortJSON(c, http.StatusUnauthorized, "akun tidak ditemukan, silakan login ulang")
 				return
@@ -52,7 +54,41 @@ func AuthMiddleware(cfg *config.AppConf, userRepo repository.UserRepository) gin
 			return
 		}
 
+		// Versi token naik saat password diganti/direset atau akun dinonaktifkan,
+		// sehingga semua sesi lama langsung tidak berlaku.
+		if claims.Version != user.TokenVersion {
+			abortJSON(c, http.StatusUnauthorized, "sesi berakhir, silakan login ulang")
+			return
+		}
+		if user.Status != model.UserActive {
+			abortJSON(c, http.StatusUnauthorized, statusMessage(user.Status))
+			return
+		}
+
+		c.Set("role", user.Role)
 		c.Set("user_id", claims.UserID)
+		c.Next()
+	}
+}
+
+func statusMessage(status string) string {
+	switch status {
+	case model.UserPending:
+		return "akun kamu menunggu persetujuan admin"
+	case model.UserSuspended:
+		return "akun ini dinonaktifkan admin"
+	default:
+		return "akun ini tidak aktif"
+	}
+}
+
+// RequireAdmin wajib dipasang setelah AuthMiddleware.
+func RequireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if role, _ := c.Get("role"); role != model.RoleAdmin {
+			abortJSON(c, http.StatusForbidden, "hanya admin yang boleh mengakses")
+			return
+		}
 		c.Next()
 	}
 }

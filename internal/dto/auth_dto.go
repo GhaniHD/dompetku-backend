@@ -1,9 +1,27 @@
 package dto
 
 type RegisterRequest struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Name       string `json:"name"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	InviteCode string `json:"invite_code"`
+}
+
+// RegisterResponse: Token kosong bila akun masih menunggu persetujuan admin.
+type RegisterResponse struct {
+	Status string       `json:"status"`
+	Token  string       `json:"token,omitempty"`
+	User   UserResponse `json:"user"`
+}
+
+type ResetPasswordRequest struct {
+	Token    string `json:"token"    binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+type InviteCheckResponse struct {
+	Valid     bool   `json:"valid"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 type LoginRequest struct {
@@ -20,6 +38,8 @@ type UserResponse struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Email     string `json:"email"`
+	Role      string `json:"role"`
+	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
 }
 
