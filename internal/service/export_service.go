@@ -27,6 +27,9 @@ type ExportService interface {
 	// Workbook menyusun laporan Excel untuk rentang tanggal inklusif. Bila start
 	// atau end nil, dipakai periode gajian yang sedang berjalan.
 	Workbook(userID uuid.UUID, start, end *time.Time) (*excelize.File, string, error)
+	// SingleSheet menyusun satu sheet rapi (transaksi atau pindahan) dengan
+	// tabel berfilter dan ringkasan SUBTOTAL.
+	SingleSheet(userID uuid.UUID, kind string, start, end *time.Time) (*excelize.File, string, error)
 }
 
 type exportService struct {

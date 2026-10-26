@@ -37,7 +37,7 @@ func idDate(t time.Time) string {
 type styles struct {
 	title, subtitle, section, header, text, wrap, muted, aside, date, datetime          int
 	money, moneyBold, moneyPos, moneyNeg, num, numBold, pct, pctBold, label, totalLabel int
-	good, warn, bad                                                                     int
+	good, warn, bad, kpiLabel, kpiMoney, kpiNum                                         int
 }
 
 const (
@@ -69,12 +69,12 @@ func newStyles(f *excelize.File) (*styles, error) {
 			Fill:      excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{brand}},
 			Alignment: &excelize.Alignment{Vertical: "center", WrapText: true},
 		}},
-		{&s.text, excelize.Style{Font: font(false, 11, inkColor), Alignment: &excelize.Alignment{Vertical: "top"}}},
-		{&s.wrap, excelize.Style{Font: font(false, 11, inkColor), Alignment: &excelize.Alignment{Vertical: "top", WrapText: true}}},
+		{&s.text, excelize.Style{Font: font(false, 11, inkColor), Alignment: &excelize.Alignment{Vertical: "top", Indent: 1}}},
+		{&s.wrap, excelize.Style{Font: font(false, 11, inkColor), Alignment: &excelize.Alignment{Vertical: "top", WrapText: true, Indent: 1}}},
 		{&s.muted, excelize.Style{Font: font(false, 10, mutedText), Alignment: &excelize.Alignment{Vertical: "top", WrapText: true}}},
 		{&s.aside, excelize.Style{Font: font(false, 10, mutedText), Alignment: &excelize.Alignment{Vertical: "top"}}},
-		{&s.date, excelize.Style{Font: font(false, 11, inkColor), CustomNumFmt: str(dateFmt), Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "top"}}},
-		{&s.datetime, excelize.Style{Font: font(false, 10, mutedText), CustomNumFmt: str("dd mmm yyyy hh:mm"), Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "top"}}},
+		{&s.date, excelize.Style{Font: font(false, 11, inkColor), CustomNumFmt: str(dateFmt), Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "top", Indent: 1}}},
+		{&s.datetime, excelize.Style{Font: font(false, 10, mutedText), CustomNumFmt: str("dd mmm yyyy hh:mm"), Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "top", Indent: 1}}},
 		{&s.money, excelize.Style{Font: font(false, 11, inkColor), CustomNumFmt: str(moneyFmt), Alignment: &excelize.Alignment{Vertical: "top"}}},
 		{&s.moneyBold, excelize.Style{Font: font(true, 11, inkColor), CustomNumFmt: str(moneyFmt), Border: top}},
 		{&s.moneyPos, excelize.Style{Font: font(false, 11, "0F9D6B"), CustomNumFmt: str(moneyFmt), Alignment: &excelize.Alignment{Vertical: "top"}}},
@@ -88,6 +88,9 @@ func newStyles(f *excelize.File) (*styles, error) {
 		{&s.good, excelize.Style{Font: font(true, 11, "0F9D6B")}},
 		{&s.warn, excelize.Style{Font: font(true, 11, "C48008")}},
 		{&s.bad, excelize.Style{Font: font(true, 11, "E0484E")}},
+		{&s.kpiLabel, excelize.Style{Font: font(false, 10, mutedText), Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{brandSoft}}, Alignment: &excelize.Alignment{Vertical: "bottom"}}},
+		{&s.kpiMoney, excelize.Style{Font: font(true, 14, inkColor), CustomNumFmt: str(moneyFmt), Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{brandSoft}}, Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"}}},
+		{&s.kpiNum, excelize.Style{Font: font(true, 14, inkColor), CustomNumFmt: str("#,##0"), Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{brandSoft}}, Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"}}},
 	}
 	for _, d := range defs {
 		id, err := f.NewStyle(&d.st)
