@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"dompetku/pkg/utils"
 	"net/http"
 
 	"dompetku/internal/dto"
@@ -64,6 +65,7 @@ func (h *TransferHandler) GetAll(c *gin.Context) {
 		errorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	filter.StartDate, filter.EndDate = utils.CalendarDate(filter.StartDate), utils.CalendarDate(filter.EndDate)
 
 	results, err := h.transferService.GetAll(userID, filter)
 	if err != nil {
