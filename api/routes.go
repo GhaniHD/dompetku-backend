@@ -6,7 +6,10 @@ import (
 	"dompetku/internal/repository"
 	claudepkg "dompetku/pkg/claude"
 	"dompetku/pkg/config"
+	"dompetku/pkg/ratelimit"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/fx"
@@ -15,6 +18,7 @@ import (
 var Module = fx.Options(
 	handler.Module,
 	fx.Provide(NewClaudeClient),
+	fx.Provide(ratelimit.New),
 	fx.Provide(NewRouter),
 )
 
@@ -39,10 +43,16 @@ func NewRouter(
 	adminHandler *handler.AdminHandler,
 	userRepo repository.UserRepository,
 	cfg *config.AppConf,
+	limiter *ratelimit.Limiter,
 ) *gin.Engine {
 	r := gin.Default()
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		log.Printf("[router] TRUSTED_PROXIES tidak valid: %v", err)
+	}
 
+	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORSMiddleware(cfg))
+	r.Use(middleware.BodyLimit(1<<20, 3<<20))
 	r.Static("/uploads", "./uploads")
 
 	r.GET("/health", func(c *gin.Context) {
@@ -51,14 +61,14 @@ func NewRouter(
 
 	auth := r.Group("/api/auth")
 	{
-		auth.POST("/register", authHandler.Register)
-		auth.POST("/login", authHandler.Login)
-		auth.GET("/invite/:code", authHandler.CheckInvite)
-		auth.POST("/reset-password", authHandler.ResetPassword)
+		auth.POST("/register", middleware.RateLimitIP(limiter, "register", 10, time.Hour), authHandler.Register)
+		auth.POST("/login", middleware.RateLimitIP(limiter, "login", 30, 15*time.Minute), authHandler.Login)
+		auth.GET("/invite/:code", middleware.RateLimitIP(limiter, "invite", 30, 15*time.Minute), authHandler.CheckInvite)
+		auth.POST("/reset-password", middleware.RateLimitIP(limiter, "reset", 10, 15*time.Minute), authHandler.ResetPassword)
 	}
 
 	protected := r.Group("/api")
-	protected.Use(middleware.AuthMiddleware(cfg, userRepo))
+	protected.Use(middleware.AuthMiddleware(cfg, userRepo), middleware.RateLimitUser(limiter, 1200, time.Minute))
 	{
 		profileHandler.RegisterRoutes(protected)
 		transactionHandler.RegisterRoutes(protected)

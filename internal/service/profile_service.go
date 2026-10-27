@@ -2,14 +2,21 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"dompetku/internal/dto"
 	"dompetku/internal/model"
@@ -80,6 +87,8 @@ func (s *profileService) buildResponse(ctx context.Context, user *model.User) (*
 		BudgetStartDay:  budgetcycle.Normalize(user.BudgetStartDay),
 		IncomeType:      incomeTypeOf(user),
 		IncomeSetupDone: user.IncomeSetupAt != nil,
+		LastLoginAt:     user.LastLoginAt,
+		LastLoginDevice: user.LastLoginDevice,
 		Role:            user.Role,
 		Status:          user.Status,
 		TotalBalance:    balance,
@@ -143,6 +152,11 @@ func (s *profileService) ChangePassword(ctx context.Context, userID uuid.UUID, r
 
 // ─── UploadAvatar ─────────────────────────────────────────────────────────────
 
+const (
+	maxAvatarBytes = 2 * 1024 * 1024
+	maxAvatarSide  = 6000
+)
+
 var allowedAvatarTypes = map[string]string{
 	"image/jpeg": ".jpg",
 	"image/png":  ".png",
@@ -150,70 +164,54 @@ var allowedAvatarTypes = map[string]string{
 }
 
 func (s *profileService) UploadAvatar(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (*dto.AvatarResponse, error) {
-	// Validasi tipe MIME
-	contentType := file.Header.Get("Content-Type")
-	ext, ok := allowedAvatarTypes[contentType]
-	if !ok {
-		return nil, ErrInvalidFileType
-	}
-
-	// Validasi ukuran (maks 2 MB)
-	if file.Size > 2*1024*1024 {
+	if file.Size > maxAvatarBytes {
 		return nil, ErrFileTooLarge
 	}
-
-	// Buat nama file unik agar tidak bertabrakan
-	filename := fmt.Sprintf("avatar_%s_%s%s",
-		userID.String(),
-		time.Now().Format("20060102150405"),
-		ext,
-	)
-
-	// Pastikan direktori tersedia
-	uploadDir := "./uploads/avatars"
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		return nil, fmt.Errorf("gagal menyiapkan direktori upload: %w", err)
-	}
-
-	// Simpan file — NOTE: SaveUploadedFile ada di *gin.Context, di sini kita
-	// buka manual karena service tidak boleh bergantung pada gin.
 	src, err := file.Open()
 	if err != nil {
 		return nil, fmt.Errorf("gagal membuka file: %w", err)
 	}
 	defer src.Close()
-
-	savePath := filepath.Join(uploadDir, filename)
-	dst, err := os.Create(savePath)
+	data, err := io.ReadAll(io.LimitReader(src, maxAvatarBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("gagal menyimpan file: %w", err)
+		return nil, fmt.Errorf("gagal membaca file: %w", err)
 	}
-	defer dst.Close()
+	if len(data) > maxAvatarBytes {
+		return nil, ErrFileTooLarge
+	}
 
-	buf := make([]byte, 32*1024)
-	for {
-		n, readErr := src.Read(buf)
-		if n > 0 {
-			if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
-				return nil, fmt.Errorf("gagal menulis file: %w", writeErr)
-			}
+	// Tipe ditentukan dari isi file, bukan dari header yang dikirim browser.
+	ext, ok := allowedAvatarTypes[http.DetectContentType(data)]
+	if !ok {
+		return nil, ErrInvalidFileType
+	}
+	if ext != ".webp" {
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil || cfg.Width > maxAvatarSide || cfg.Height > maxAvatarSide {
+			return nil, ErrInvalidFileType
 		}
-		if readErr != nil {
-			break
-		}
+	}
+
+	name := make([]byte, 16)
+	if _, err := rand.Read(name); err != nil {
+		return nil, err
+	}
+	filename := "avatar_" + hex.EncodeToString(name) + ext
+
+	uploadDir := "./uploads/avatars"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return nil, fmt.Errorf("gagal menyiapkan direktori upload: %w", err)
+	}
+	savePath := filepath.Join(uploadDir, filename)
+	if err := os.WriteFile(savePath, data, 0644); err != nil {
+		return nil, fmt.Errorf("gagal menyimpan file: %w", err)
 	}
 
 	avatarURL := "/uploads/avatars/" + filename
-
-	// Update database & hapus file lama
-	user, err := s.profileRepo.UpdateAvatar(ctx, userID, avatarURL)
-	if err != nil {
-		// Rollback: hapus file yang baru saja disimpan
+	if _, err := s.profileRepo.UpdateAvatar(ctx, userID, avatarURL); err != nil {
 		os.Remove(savePath)
 		return nil, err
 	}
-	_ = user
-
 	return &dto.AvatarResponse{AvatarURL: avatarURL}, nil
 }
 

@@ -54,10 +54,11 @@ func AuthMiddleware(cfg *config.AppConf, userRepo repository.UserRepository) gin
 			return
 		}
 
-		// Versi token naik saat password diganti/direset atau akun dinonaktifkan,
-		// sehingga semua sesi lama langsung tidak berlaku.
+		// Versi token naik saat login di perangkat lain, password diganti/direset,
+		// atau akun dinonaktifkan, sehingga sesi lama langsung tidak berlaku.
 		if claims.Version != user.TokenVersion {
-			abortJSON(c, http.StatusUnauthorized, "sesi berakhir, silakan login ulang")
+			code, message := sessionEnded(user.SessionReason)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "code": code, "message": message, "data": nil})
 			return
 		}
 		if user.Status != model.UserActive {
@@ -68,6 +69,17 @@ func AuthMiddleware(cfg *config.AppConf, userRepo repository.UserRepository) gin
 		c.Set("role", user.Role)
 		c.Set("user_id", claims.UserID)
 		c.Next()
+	}
+}
+
+func sessionEnded(reason string) (string, string) {
+	switch reason {
+	case model.SessionLogin:
+		return "session_replaced", "Kamu keluar karena akun ini masuk di perangkat lain."
+	case model.SessionPassword:
+		return "password_changed", "Password akun ini baru diganti. Silakan masuk lagi."
+	default:
+		return "session_ended", "Sesi berakhir, silakan masuk lagi."
 	}
 }
 

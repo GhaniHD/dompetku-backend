@@ -5,8 +5,11 @@ import (
 	"strings"
 
 	"dompetku/internal/dto"
+	"dompetku/internal/middleware"
 	"dompetku/internal/service"
+	"dompetku/pkg/ratelimit"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,11 +17,21 @@ import (
 // AuthHandler menangani request HTTP yang berkaitan dengan autentikasi
 type AuthHandler struct {
 	authService service.AuthService
+	limiter     *ratelimit.Limiter
 }
 
 // NewAuthHandler membuat instance baru AuthHandler
-func NewAuthHandler(authService service.AuthService) *AuthHandler {
-	return &AuthHandler{authService: authService}
+func NewAuthHandler(authService service.AuthService, limiter *ratelimit.Limiter) *AuthHandler {
+	return &AuthHandler{authService: authService, limiter: limiter}
+}
+
+const (
+	maxLoginFailures = 5
+	loginLockout     = 15 * time.Minute
+)
+
+func clientInfo(c *gin.Context) dto.ClientInfo {
+	return dto.ClientInfo{UserAgent: c.Request.UserAgent(), IP: c.ClientIP()}
 }
 
 // Register godoc
@@ -38,7 +51,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.authService.Register(c.Request.Context(), req)
+	resp, err := h.authService.Register(c.Request.Context(), req, clientInfo(c))
 	if err != nil {
 		if !isUserFacing(err) {
 			serviceErrorResponse(c, err)
@@ -72,7 +85,20 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.authService.Login(c.Request.Context(), req)
+	// Kunci per email setelah beberapa kali gagal, terlepas dari IP penebak.
+	failKey := "login-fail:" + strings.ToLower(strings.TrimSpace(req.Email))
+	if blocked, retry := h.limiter.Blocked(failKey, maxLoginFailures, loginLockout); blocked {
+		middleware.TooManyRequests(c, retry)
+		return
+	}
+
+	resp, err := h.authService.Login(c.Request.Context(), req, clientInfo(c))
+	if errors.Is(err, service.ErrInvalidCredentials) {
+		h.limiter.Allow(failKey, maxLoginFailures, loginLockout)
+	}
+	if err == nil {
+		h.limiter.Reset(failKey)
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrAccountPending) || errors.Is(err, service.ErrAccountRejected) || errors.Is(err, service.ErrAccountSuspended) {
 			errorResponse(c, http.StatusForbidden, err.Error())

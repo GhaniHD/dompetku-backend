@@ -43,11 +43,13 @@ type ProfileResponse struct {
 	AvatarURL string    `json:"avatar_url"`
 	CreatedAt time.Time `json:"created_at"`
 
-	BudgetStartDay  int    `json:"budget_start_day"`
-	IncomeType      string `json:"income_type"`
-	IncomeSetupDone bool   `json:"income_setup_done"`
-	Role            string `json:"role"`
-	Status          string `json:"status"`
+	BudgetStartDay  int        `json:"budget_start_day"`
+	IncomeType      string     `json:"income_type"`
+	IncomeSetupDone bool       `json:"income_setup_done"`
+	LastLoginAt     *time.Time `json:"last_login_at"`
+	LastLoginDevice string     `json:"last_login_device"`
+	Role            string     `json:"role"`
+	Status          string     `json:"status"`
 
 	// Statistik ringkas (dihitung dari relasi)
 	TotalBalance float64 `json:"balance"`

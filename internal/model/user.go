@@ -24,20 +24,28 @@ type User struct {
 	// Status akun: pending (menunggu admin), active, suspended, rejected.
 	// Default kolom "active" agar akun lama tetap bisa login setelah migrasi;
 	// pendaftaran baru diisi eksplisit oleh service.
-	Role         string         `gorm:"type:varchar(10);not null;default:'user'" json:"role"`
-	Status       string         `gorm:"type:varchar(12);not null;default:'active'" json:"status"`
-	StatusReason string         `gorm:"type:text;not null;default:''" json:"-"`
-	ApprovedAt   *time.Time     `json:"-"`
-	ApprovedBy   *uuid.UUID     `gorm:"type:uuid" json:"-"`
-	LastLoginAt  *time.Time     `json:"-"`
-	TokenVersion int            `gorm:"not null;default:0" json:"-"`
-	InviteID     *uuid.UUID     `gorm:"type:uuid" json:"-"`
-	CreatedAt    time.Time      `gorm:"autoCreateTime"                                  json:"created_at"`
-	UpdatedAt    time.Time      `gorm:"autoUpdateTime"                                  json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"                                           json:"-"`
+	Role         string     `gorm:"type:varchar(10);not null;default:'user'" json:"role"`
+	Status       string     `gorm:"type:varchar(12);not null;default:'active'" json:"status"`
+	StatusReason string     `gorm:"type:text;not null;default:''" json:"-"`
+	ApprovedAt   *time.Time `json:"-"`
+	ApprovedBy   *uuid.UUID `gorm:"type:uuid" json:"-"`
+	LastLoginAt  *time.Time `json:"-"`
+	TokenVersion int        `gorm:"not null;default:0" json:"-"`
+	// SessionReason: alasan versi token terakhir dinaikkan (login, password, admin).
+	SessionReason   string         `gorm:"type:varchar(20);not null;default:''" json:"-"`
+	LastLoginDevice string         `gorm:"type:varchar(120);not null;default:''" json:"-"`
+	LastLoginIP     string         `gorm:"type:varchar(64);not null;default:''" json:"-"`
+	InviteID        *uuid.UUID     `gorm:"type:uuid" json:"-"`
+	CreatedAt       time.Time      `gorm:"autoCreateTime"                                  json:"created_at"`
+	UpdatedAt       time.Time      `gorm:"autoUpdateTime"                                  json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index"                                           json:"-"`
 }
 
 const (
+	SessionLogin    = "login"
+	SessionPassword = "password"
+	SessionAdmin    = "admin"
+
 	IncomeSalary    = "salary"
 	IncomeIrregular = "irregular"
 

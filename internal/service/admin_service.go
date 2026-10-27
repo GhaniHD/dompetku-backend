@@ -143,7 +143,7 @@ func (s *adminService) Reject(adminID, userID uuid.UUID, reason string) error {
 func (s *adminService) Suspend(adminID, userID uuid.UUID, reason string) error {
 	reason = strings.TrimSpace(reason)
 	_, err := s.transition(adminID, userID, "suspend", []string{model.UserActive}, func(*model.User) map[string]any {
-		return map[string]any{"status": model.UserSuspended, "status_reason": reason, "token_version": gorm.Expr("token_version + 1")}
+		return map[string]any{"status": model.UserSuspended, "status_reason": reason, "token_version": gorm.Expr("token_version + 1"), "session_reason": model.SessionAdmin}
 	}, reason)
 	return err
 }

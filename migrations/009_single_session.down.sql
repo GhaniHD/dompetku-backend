@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE users DROP COLUMN IF EXISTS last_login_ip;
+ALTER TABLE users DROP COLUMN IF EXISTS last_login_device;
+ALTER TABLE users DROP COLUMN IF EXISTS session_reason;
+
+COMMIT;
