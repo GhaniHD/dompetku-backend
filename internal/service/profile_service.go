@@ -34,6 +34,7 @@ var (
 	ErrUserNotFound     = errors.New("user tidak ditemukan")
 	ErrInvalidFileType  = errors.New("format tidak didukung, gunakan JPG PNG atau WebP")
 	ErrFileTooLarge     = errors.New("ukuran file maksimal 2 MB")
+	ErrDailyCategory    = errors.New("kategori jatah harian harus kategori pengeluaran milikmu")
 )
 
 type ProfileService interface {
@@ -44,6 +45,7 @@ type ProfileService interface {
 	DeleteAccount(ctx context.Context, userID uuid.UUID) error
 	UpdateBudgetCycle(ctx context.Context, userID uuid.UUID, req *dto.UpdateBudgetCycleRequest) (*dto.ProfileResponse, error)
 	UpdateIncome(ctx context.Context, userID uuid.UUID, req *dto.UpdateIncomeRequest) (*dto.ProfileResponse, error)
+	UpdateDailyCategories(ctx context.Context, userID uuid.UUID, req *dto.UpdateDailyCategoriesRequest) (*dto.ProfileResponse, error)
 }
 
 type profileService struct {
@@ -84,16 +86,17 @@ func (s *profileService) buildResponse(ctx context.Context, user *model.User) (*
 		AvatarURL: user.AvatarURL,
 		CreatedAt: user.CreatedAt,
 
-		BudgetStartDay:  budgetcycle.Normalize(user.BudgetStartDay),
-		IncomeType:      incomeTypeOf(user),
-		IncomeSetupDone: user.IncomeSetupAt != nil,
-		LastLoginAt:     user.LastLoginAt,
-		LastLoginDevice: user.LastLoginDevice,
-		Role:            user.Role,
-		Status:          user.Status,
-		TotalBalance:    balance,
-		TotalTx:         txCount,
-		TotalWallet:     walletCount,
+		BudgetStartDay:   budgetcycle.Normalize(user.BudgetStartDay),
+		IncomeType:       incomeTypeOf(user),
+		IncomeSetupDone:  user.IncomeSetupAt != nil,
+		DailyCategoryIDs: dailyCategoryIDs(user),
+		LastLoginAt:      user.LastLoginAt,
+		LastLoginDevice:  user.LastLoginDevice,
+		Role:             user.Role,
+		Status:           user.Status,
+		TotalBalance:     balance,
+		TotalTx:          txCount,
+		TotalWallet:      walletCount,
 	}, nil
 }
 
@@ -253,6 +256,39 @@ func (s *profileService) UpdateIncome(ctx context.Context, userID uuid.UUID, req
 		day = budgetcycle.Normalize(user.BudgetStartDay)
 	}
 	if err := s.profileRepo.UpdateIncome(ctx, userID, req.IncomeType, day); err != nil {
+		return nil, err
+	}
+	return s.GetProfile(ctx, userID)
+}
+
+// ─── UpdateDailyCategories ────────────────────────────────────────────────────
+
+func dailyCategoryIDs(user *model.User) []uuid.UUID {
+	if user.DailyCategoryIDs == nil {
+		return []uuid.UUID{}
+	}
+	return user.DailyCategoryIDs
+}
+
+func (s *profileService) UpdateDailyCategories(ctx context.Context, userID uuid.UUID, req *dto.UpdateDailyCategoriesRequest) (*dto.ProfileResponse, error) {
+	ids := make([]uuid.UUID, 0, len(req.CategoryIDs))
+	seen := map[uuid.UUID]bool{}
+	for _, id := range req.CategoryIDs {
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) > 0 {
+		n, err := s.profileRepo.CountExpenseCategories(ctx, userID, ids)
+		if err != nil {
+			return nil, err
+		}
+		if n != int64(len(ids)) {
+			return nil, ErrDailyCategory
+		}
+	}
+	if err := s.profileRepo.UpdateDailyCategories(ctx, userID, ids); err != nil {
 		return nil, err
 	}
 	return s.GetProfile(ctx, userID)

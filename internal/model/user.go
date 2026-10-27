@@ -20,6 +20,8 @@ type User struct {
 	// irregular (tidak tetap/belum bekerja, periode = bulan kalender).
 	IncomeType    string     `gorm:"type:varchar(12);not null;default:'salary'" json:"income_type"`
 	IncomeSetupAt *time.Time `json:"-"`
+	// DailyCategoryIDs: kategori yang dipakai kartu jatah harian; kosong = semua anggaran.
+	DailyCategoryIDs []uuid.UUID `gorm:"type:jsonb;serializer:json;not null;default:'[]'" json:"-"`
 
 	// Status akun: pending (menunggu admin), active, suspended, rejected.
 	// Default kolom "active" agar akun lama tetap bisa login setelah migrasi;

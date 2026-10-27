@@ -314,6 +314,7 @@ func toListResponse(t model.Transaction) dto.TransactionResponse {
 		Note:         t.Note,
 		Date:         t.TransactionDate,
 		WalletName:   t.Wallet.Name,
+		CategoryID:   t.CategoryID,
 		CategoryName: t.Category.Name,
 	}
 }

@@ -36,6 +36,7 @@ func (h *ProfileHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		profile.DELETE("", h.DeleteAccount)
 		profile.PUT("/budget-cycle", h.UpdateBudgetCycle)
 		profile.PUT("/income", h.UpdateIncome)
+		profile.PUT("/daily-categories", h.UpdateDailyCategories)
 	}
 }
 
@@ -49,6 +50,8 @@ func profileErrResponse(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrWrongPassword):
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrInvalidFileType):
+		errorResponse(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrDailyCategory):
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrFileTooLarge):
 		errorResponse(c, http.StatusRequestEntityTooLarge, err.Error())
@@ -190,6 +193,26 @@ func (h *ProfileHandler) UpdateIncome(c *gin.Context) {
 	}
 
 	successResponse(c, http.StatusOK, "jenis pemasukan berhasil diperbarui", resp)
+}
+
+// PUT /api/profile/daily-categories  {category_ids: []}
+func (h *ProfileHandler) UpdateDailyCategories(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+	var req dto.UpdateDailyCategoriesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "pilih maksimal 20 kategori pengeluaran")
+		return
+	}
+	resp, err := h.profileService.UpdateDailyCategories(c.Request.Context(), userID, &req)
+	if err != nil {
+		profileErrResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "jatah harian berhasil diperbarui", resp)
 }
 
 // PUT /api/profile/budget-cycle

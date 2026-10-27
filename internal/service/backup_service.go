@@ -50,6 +50,8 @@ type backupPayload struct {
 	Profile     struct {
 		BudgetStartDay int    `json:"budget_start_day"`
 		IncomeType     string `json:"income_type"`
+		// Opsional: backup lama belum memiliki kolom ini.
+		DailyCategoryIDs []uuid.UUID `json:"daily_category_ids,omitempty"`
 	} `json:"profile"`
 	Categories    []bCategory    `json:"categories"`
 	Wallets       []bWallet      `json:"wallets"`
@@ -250,6 +252,7 @@ func (s *backupService) collect(ctx context.Context, user *model.User) (*backupP
 	p := &backupPayload{Format: backupFormat, Version: backupVersion, CreatedAt: s.now().UTC(), SourceName: user.Name, SourceEmail: user.Email}
 	p.Profile.BudgetStartDay = user.BudgetStartDay
 	p.Profile.IncomeType = incomeTypeOf(user)
+	p.Profile.DailyCategoryIDs = user.DailyCategoryIDs
 
 	var categories []model.Category
 	var wallets []model.Wallet
@@ -455,6 +458,7 @@ func (s *backupService) Restore(ctx context.Context, userID uuid.UUID, accountPa
 		return nil, err
 	}
 
+	now := s.now()
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var locked model.User
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", userID).First(&locked).Error; err != nil {
@@ -463,7 +467,8 @@ func (s *backupService) Restore(ctx context.Context, userID uuid.UUID, accountPa
 		if err := wipeUserData(tx, userID); err != nil {
 			return err
 		}
-		if err := insertPayload(tx, userID, p); err != nil {
+		ids, err := insertPayload(tx, userID, p)
+		if err != nil {
 			return err
 		}
 		if err := verifyBalances(tx, userID, p); err != nil {
@@ -477,8 +482,8 @@ func (s *backupService) Restore(ctx context.Context, userID uuid.UUID, accountPa
 		if incomeType != model.IncomeIrregular {
 			incomeType = model.IncomeSalary
 		}
-		return tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
-			"budget_start_day": day, "income_type": incomeType, "income_setup_at": s.now(),
+		return tx.Model(&model.User{ID: userID}).Select("budget_start_day", "income_type", "income_setup_at", "daily_category_ids").Updates(&model.User{
+			BudgetStartDay: day, IncomeType: incomeType, IncomeSetupAt: &now, DailyCategoryIDs: restoredDailyCategories(p, ids),
 		}).Error
 	})
 	if err != nil {
@@ -547,7 +552,7 @@ func deletedAt(t *time.Time) gorm.DeletedAt {
 
 // insertPayload memasukkan isi backup dengan ID baru, karena akun asal bisa
 // saja masih ada dan memakai ID yang sama.
-func insertPayload(tx *gorm.DB, userID uuid.UUID, p *backupPayload) error {
+func insertPayload(tx *gorm.DB, userID uuid.UUID, p *backupPayload) (idMap, error) {
 	ids := idMap{}
 	insert := func(rows any) error {
 		return tx.Omit(clause.Associations).CreateInBatches(rows, 500).Error
@@ -628,10 +633,28 @@ func insertPayload(tx *gorm.DB, userID uuid.UUID, p *backupPayload) error {
 			continue
 		}
 		if err := insert(step.rows); err != nil {
-			return fmt.Errorf("pulihkan %s: %w", step.name, err)
+			return nil, fmt.Errorf("pulihkan %s: %w", step.name, err)
 		}
 	}
-	return nil
+	return ids, nil
+}
+
+// restoredDailyCategories memetakan pilihan jatah harian ke ID kategori baru;
+// kategori yang tidak ada di backup atau sudah dihapus diabaikan.
+func restoredDailyCategories(p *backupPayload, ids idMap) []uuid.UUID {
+	usable := map[uuid.UUID]bool{}
+	for _, c := range p.Categories {
+		if c.Type == "expense" && c.DeletedAt == nil {
+			usable[c.ID] = true
+		}
+	}
+	out := []uuid.UUID{}
+	for _, id := range p.Profile.DailyCategoryIDs {
+		if usable[id] {
+			out = append(out, ids[id])
+		}
+	}
+	return out
 }
 
 // verifyBalances menghitung ulang saldo setiap dompet dari mutasinya dan
