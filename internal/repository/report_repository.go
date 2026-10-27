@@ -101,8 +101,8 @@ func (r *reportRepository) GetTotalByTypeYearly(userID uuid.UUID, txType string,
 	err := r.db.Table("transactions").
 		Select("COALESCE(SUM(amount), 0)").
 		Where(`user_id = ? AND type = ?
-			AND EXTRACT(YEAR FROM transaction_date) = ?
-			AND deleted_at IS NULL`, userID, txType, year).
+			AND transaction_date >= make_date(CAST(? AS int), 1, 1) AND transaction_date < make_date(CAST(? AS int) + 1, 1, 1)
+			AND deleted_at IS NULL`, userID, txType, year, year).
 		Scan(&total).Error
 	return total, err
 }
@@ -119,8 +119,8 @@ func (r *reportRepository) GetBreakdownByCategoryYearly(userID uuid.UUID, txType
 		Select("t.category_id, c.name AS category_name, COALESCE(SUM(t.amount),0) AS total, COUNT(t.id) AS tx_count").
 		Joins("JOIN categories c ON c.id = t.category_id").
 		Where(`t.user_id = ? AND t.type = ?
-			AND EXTRACT(YEAR FROM t.transaction_date) = ?
-			AND t.deleted_at IS NULL`, userID, txType, year).
+			AND t.transaction_date >= make_date(CAST(? AS int), 1, 1) AND t.transaction_date < make_date(CAST(? AS int) + 1, 1, 1)
+			AND t.deleted_at IS NULL`, userID, txType, year, year).
 		Group("t.category_id, c.name").Order("total DESC").
 		Scan(&rows).Error
 	if err != nil {
@@ -143,8 +143,8 @@ func (r *reportRepository) GetMonthlyBreakdown(userID uuid.UUID, year int) ([]dt
 			COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END),0) AS income,
 			COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense`).
 		Where(`user_id = ?
-			AND EXTRACT(YEAR FROM transaction_date) = ?
-			AND deleted_at IS NULL`, userID, year).
+			AND transaction_date >= make_date(CAST(? AS int), 1, 1) AND transaction_date < make_date(CAST(? AS int) + 1, 1, 1)
+			AND deleted_at IS NULL`, userID, year, year).
 		Group("month").Order("month ASC").Scan(&rows).Error
 	if err != nil {
 		return nil, err

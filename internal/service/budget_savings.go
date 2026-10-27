@@ -14,9 +14,10 @@ import (
 // budgetLookup menyimpan data yang dipakai berulang saat menyusun daftar
 // anggaran, agar saldo dompet dan nama dompet/target cukup diambil sekali.
 type budgetLookup struct {
-	s        *budgetService
-	userID   uuid.UUID
-	day      int
+	s      *budgetService
+	userID uuid.UUID
+	day    int
+	// balances: perubahan saldo per dompet, dikunci per tanggal mulai periode.
 	balances map[string]map[uuid.UUID]float64
 	wallets  map[uuid.UUID]model.Wallet
 	goals    map[uuid.UUID]model.Goal
@@ -26,31 +27,21 @@ func (s *budgetService) newBudgetLookup(userID uuid.UUID, day int) *budgetLookup
 	return &budgetLookup{s: s, userID: userID, day: day, balances: map[string]map[uuid.UUID]float64{}}
 }
 
-func (l *budgetLookup) balancesBefore(date string) (map[uuid.UUID]float64, error) {
-	if b, ok := l.balances[date]; ok {
-		return b, nil
-	}
-	b, err := l.s.exportRepo.BalancesBefore(l.userID, date)
-	if err != nil {
-		return nil, err
-	}
-	l.balances[date] = b
-	return b, nil
-}
-
 // deposited = perubahan saldo dompet selama periode: semua uang masuk dikurangi
 // semua uang keluar, termasuk pengambilan untuk keperluan lain.
 func (l *budgetLookup) deposited(year, month int, walletID uuid.UUID) (float64, error) {
 	start, next := budgetcycle.Period(l.day, year, month)
-	before, err := l.balancesBefore(start.Format("2006-01-02"))
-	if err != nil {
-		return 0, err
+	key := start.Format("2006-01-02")
+	deltas, ok := l.balances[key]
+	if !ok {
+		var err error
+		deltas, err = l.s.exportRepo.WalletDeltas(l.userID, key, next.Format("2006-01-02"))
+		if err != nil {
+			return 0, err
+		}
+		l.balances[key] = deltas
 	}
-	after, err := l.balancesBefore(next.Format("2006-01-02"))
-	if err != nil {
-		return 0, err
-	}
-	return after[walletID] - before[walletID], nil
+	return deltas[walletID], nil
 }
 
 func (l *budgetLookup) loadWallets() error {

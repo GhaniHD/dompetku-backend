@@ -42,8 +42,8 @@ func (r *analysisRepository) GetMonthlyTrend(userID uuid.UUID, year int) ([]dto.
 		Select(`EXTRACT(MONTH FROM transaction_date)::int AS month,
 			COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END),0) AS income,
 			COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense`).
-		Where(`user_id = ? AND EXTRACT(YEAR FROM transaction_date) = ? AND deleted_at IS NULL`,
-			userID, year).
+		Where(`user_id = ? AND transaction_date >= make_date(CAST(? AS int), 1, 1) AND transaction_date < make_date(CAST(? AS int) + 1, 1, 1) AND deleted_at IS NULL`,
+			userID, year, year).
 		Group("month").Order("month ASC").Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -86,8 +86,8 @@ func (r *analysisRepository) getCategoryShare(userID uuid.UUID, txType string, y
 	err := r.db.Table("transactions t").
 		Select("c.name AS category_name, COALESCE(SUM(t.amount),0) AS total").
 		Joins("JOIN categories c ON c.id = t.category_id").
-		Where(`t.user_id = ? AND t.type = ? AND EXTRACT(YEAR FROM t.transaction_date) = ? AND t.deleted_at IS NULL`,
-			userID, txType, year).
+		Where(`t.user_id = ? AND t.type = ? AND t.transaction_date >= make_date(CAST(? AS int), 1, 1) AND t.transaction_date < make_date(CAST(? AS int) + 1, 1, 1) AND t.deleted_at IS NULL`,
+			userID, txType, year, year).
 		Group("c.name").Order("total DESC").Scan(&rows).Error
 	if err != nil {
 		return nil, err
