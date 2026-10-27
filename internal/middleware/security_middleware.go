@@ -33,12 +33,15 @@ func SecurityHeaders() gin.HandlerFunc {
 	}
 }
 
-// BodyLimit membatasi ukuran body request; upload avatar memakai batas sendiri.
-func BodyLimit(defaultBytes, uploadBytes int64) gin.HandlerFunc {
+// BodyLimit membatasi ukuran body request. overrides memetakan akhiran path
+// (mis. "/avatar") ke batas khusus.
+func BodyLimit(defaultBytes int64, overrides map[string]int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit := defaultBytes
-		if strings.HasSuffix(c.Request.URL.Path, "/avatar") {
-			limit = uploadBytes
+		for suffix, n := range overrides {
+			if strings.HasSuffix(c.Request.URL.Path, suffix) {
+				limit = n
+			}
 		}
 		if c.Request.ContentLength > limit {
 			abortJSON(c, http.StatusRequestEntityTooLarge, "ukuran data terlalu besar")
@@ -72,9 +75,14 @@ func RateLimitIP(l *ratelimit.Limiter, name string, limit int, per time.Duration
 
 // RateLimitUser wajib dipasang setelah AuthMiddleware.
 func RateLimitUser(l *ratelimit.Limiter, limit int, per time.Duration) gin.HandlerFunc {
+	return RateLimitUserNamed(l, "user", limit, per)
+}
+
+// RateLimitUserNamed membatasi satu kelompok endpoint per akun.
+func RateLimitUserNamed(l *ratelimit.Limiter, name string, limit int, per time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, _ := c.Get("user_id")
-		if ok, retry := l.Allow(fmt.Sprint("user:", id), limit, per); !ok {
+		if ok, retry := l.Allow(fmt.Sprint(name, ":", id), limit, per); !ok {
 			TooManyRequests(c, retry)
 			return
 		}

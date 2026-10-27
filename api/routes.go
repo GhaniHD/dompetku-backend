@@ -41,6 +41,7 @@ func NewRouter(
 	recurringHandler *handler.RecurringHandler,
 	debtGoalHandler *handler.DebtGoalHandler,
 	adminHandler *handler.AdminHandler,
+	backupHandler *handler.BackupHandler,
 	userRepo repository.UserRepository,
 	cfg *config.AppConf,
 	limiter *ratelimit.Limiter,
@@ -52,7 +53,11 @@ func NewRouter(
 
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORSMiddleware(cfg))
-	r.Use(middleware.BodyLimit(1<<20, 3<<20))
+	r.Use(middleware.BodyLimit(1<<20, map[string]int64{
+		"/avatar":         3 << 20,
+		"/backup/preview": handler.MaxBackupFileSize + 1<<20,
+		"/backup/restore": handler.MaxBackupFileSize + 1<<20,
+	}))
 	r.Use(middleware.Gzip())
 	r.Static("/uploads", "./uploads")
 
@@ -84,6 +89,11 @@ func NewRouter(
 		recurringHandler.RegisterRoutes(protected)
 		debtGoalHandler.RegisterRoutes(protected)
 		adminHandler.RegisterRoutes(protected.Group("/admin", middleware.RequireAdmin()))
+
+		backup := protected.Group("/backup")
+		backup.POST("/export", middleware.RateLimitUserNamed(limiter, "backup-export", 5, time.Hour), backupHandler.Export)
+		backup.POST("/preview", middleware.RateLimitUserNamed(limiter, "backup-preview", 10, time.Hour), backupHandler.Preview)
+		backup.POST("/restore", middleware.RateLimitUserNamed(limiter, "backup-restore", 5, time.Hour), backupHandler.Restore)
 	}
 
 	return r

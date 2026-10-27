@@ -1,0 +1,12 @@
+DROP INDEX IF EXISTS idx_transactions_wallet_fk;
+DROP INDEX IF EXISTS idx_transactions_category_fk;
+DROP INDEX IF EXISTS idx_transfers_from_wallet_fk;
+DROP INDEX IF EXISTS idx_transfers_to_wallet_fk;
+DROP INDEX IF EXISTS idx_balance_adjustments_wallet_fk;
+DROP INDEX IF EXISTS idx_debt_movements_wallet_fk;
+DROP INDEX IF EXISTS idx_budgets_category_fk;
+DROP INDEX IF EXISTS idx_budgets_wallet_fk;
+DROP INDEX IF EXISTS idx_budgets_goal_fk;
+DROP INDEX IF EXISTS idx_goals_wallet_fk;
+DROP INDEX IF EXISTS idx_recurring_wallet_fk;
+DROP INDEX IF EXISTS idx_recurring_category_fk;

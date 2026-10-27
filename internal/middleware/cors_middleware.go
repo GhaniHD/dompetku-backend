@@ -20,6 +20,9 @@ func CORSMiddleware(cfg *config.AppConf) gin.HandlerFunc {
 		// Header yang diizinkan dikirim oleh client
 		AllowHeaders: []string{"Authorization", "Content-Type"},
 
+		// Agar frontend bisa membaca nama file unduhan (backup).
+		ExposeHeaders: []string{"Content-Disposition"},
+
 		// Izinkan pengiriman cookie / credentials
 		AllowCredentials: true,
 	})
