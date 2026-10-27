@@ -33,6 +33,12 @@ type UpdateIncomeRequest struct {
 	StartDay   int    `json:"start_day"   binding:"omitempty,min=1,max=31"`
 }
 
+// UpdateDailyCategoriesRequest digunakan untuk PUT /api/profile/daily-categories.
+// Daftar kosong berarti jatah harian memakai semua anggaran pengeluaran.
+type UpdateDailyCategoriesRequest struct {
+	CategoryIDs []uuid.UUID `json:"category_ids" binding:"max=20"`
+}
+
 // ─── Response DTOs ────────────────────────────────────────────────────────────
 
 // ProfileResponse adalah respons lengkap profil pengguna
@@ -43,13 +49,15 @@ type ProfileResponse struct {
 	AvatarURL string    `json:"avatar_url"`
 	CreatedAt time.Time `json:"created_at"`
 
-	BudgetStartDay  int        `json:"budget_start_day"`
-	IncomeType      string     `json:"income_type"`
-	IncomeSetupDone bool       `json:"income_setup_done"`
-	LastLoginAt     *time.Time `json:"last_login_at"`
-	LastLoginDevice string     `json:"last_login_device"`
-	Role            string     `json:"role"`
-	Status          string     `json:"status"`
+	BudgetStartDay  int    `json:"budget_start_day"`
+	IncomeType      string `json:"income_type"`
+	IncomeSetupDone bool   `json:"income_setup_done"`
+	// DailyCategoryIDs: kategori kartu jatah harian; kosong = semua anggaran.
+	DailyCategoryIDs []uuid.UUID `json:"daily_category_ids"`
+	LastLoginAt      *time.Time  `json:"last_login_at"`
+	LastLoginDevice  string      `json:"last_login_device"`
+	Role             string      `json:"role"`
+	Status           string      `json:"status"`
 
 	// Statistik ringkas (dihitung dari relasi)
 	TotalBalance float64 `json:"balance"`

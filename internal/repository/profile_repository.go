@@ -22,6 +22,8 @@ type ProfileRepository interface {
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	UpdateBudgetStartDay(ctx context.Context, id uuid.UUID, day int) error
 	UpdateIncome(ctx context.Context, id uuid.UUID, incomeType string, day int) error
+	UpdateDailyCategories(ctx context.Context, id uuid.UUID, categoryIDs []uuid.UUID) error
+	CountExpenseCategories(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (int64, error)
 
 	// Statistik
 	SumWalletBalance(ctx context.Context, userID uuid.UUID) (float64, error)
@@ -143,6 +145,22 @@ func (r *profileRepository) UpdateIncome(ctx context.Context, id uuid.UUID, inco
 		Model(&model.User{}).
 		Where("id = ?", id).
 		Updates(map[string]any{"income_type": incomeType, "budget_start_day": day, "income_setup_at": time.Now()}).Error
+}
+
+func (r *profileRepository) UpdateDailyCategories(ctx context.Context, id uuid.UUID, categoryIDs []uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Model(&model.User{ID: id}).
+		Select("daily_category_ids").
+		Updates(&model.User{DailyCategoryIDs: categoryIDs}).Error
+}
+
+func (r *profileRepository) CountExpenseCategories(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).
+		Model(&model.Category{}).
+		Where("user_id = ? AND type = ? AND id IN ?", userID, "expense", ids).
+		Count(&n).Error
+	return n, err
 }
 
 func (r *profileRepository) UpdateBudgetStartDay(ctx context.Context, id uuid.UUID, day int) error {

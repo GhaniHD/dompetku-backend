@@ -14,8 +14,9 @@ type TransactionResponse struct {
 	Note        string     `json:"note"`
 	Date        time.Time  `json:"date"`
 
-	WalletName   string `json:"wallet_name"`
-	CategoryName string `json:"category_name"`
+	WalletName   string    `json:"wallet_name"`
+	CategoryID   uuid.UUID `json:"category_id"`
+	CategoryName string    `json:"category_name"`
 }
 
 type TransactionDetailResponse struct {
