@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"dompetku/pkg/utils"
 	"net/http"
 
 	"dompetku/internal/dto"
@@ -71,6 +72,7 @@ func (h *TransactionHandler) GetAllTransactions(c *gin.Context) {
 		errorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	filter.StartDate, filter.EndDate = utils.CalendarDate(filter.StartDate), utils.CalendarDate(filter.EndDate)
 
 	results, err := h.transactionService.GetAllTransactions(userID, filter)
 	if err != nil {

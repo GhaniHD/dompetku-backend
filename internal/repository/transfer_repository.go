@@ -3,6 +3,7 @@ package repository
 import (
 	"dompetku/internal/dto"
 	"dompetku/internal/model"
+	"dompetku/pkg/utils"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -56,10 +57,10 @@ func (r *transferRepository) FindAll(userID uuid.UUID, filter dto.TransferFilter
 		query = query.Where("from_wallet_id = ? OR to_wallet_id = ?", filter.WalletID, filter.WalletID)
 	}
 	if filter.StartDate != nil {
-		query = query.Where("transfer_date >= ?", *filter.StartDate)
+		query = query.Where("transfer_date >= CAST(? AS date)", utils.DateOnly(*filter.StartDate))
 	}
 	if filter.EndDate != nil {
-		query = query.Where("transfer_date <= ?", *filter.EndDate)
+		query = query.Where("transfer_date <= CAST(? AS date)", utils.DateOnly(*filter.EndDate))
 	}
 
 	err := query.Order("transfer_date DESC, created_at DESC").Find(&transfers).Error

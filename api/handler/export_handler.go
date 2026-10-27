@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"dompetku/pkg/utils"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -81,6 +82,7 @@ func (h *ExportHandler) Transactions(c *gin.Context) {
 		errorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	filter.StartDate, filter.EndDate = utils.CalendarDate(filter.StartDate), utils.CalendarDate(filter.EndDate)
 
 	items, err := h.transactionService.GetAllTransactions(userID, dto.TransactionFilterRequest{
 		StartDate: filter.StartDate,
@@ -116,6 +118,7 @@ func (h *ExportHandler) Transfers(c *gin.Context) {
 		errorResponse(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	filter.StartDate, filter.EndDate = utils.CalendarDate(filter.StartDate), utils.CalendarDate(filter.EndDate)
 
 	items, err := h.transferService.GetAll(userID, dto.TransferFilterRequest{
 		StartDate: filter.StartDate,

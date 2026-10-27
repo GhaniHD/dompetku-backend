@@ -3,6 +3,7 @@ package repository
 import (
 	"dompetku/internal/dto"
 	"dompetku/internal/model"
+	"dompetku/pkg/utils"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -69,10 +70,10 @@ func (r *transactionRepository) FindAll(userID uuid.UUID, filter dto.Transaction
 		query = query.Where("type = ?", *filter.Type)
 	}
 	if filter.StartDate != nil {
-		query = query.Where("transaction_date >= ?", *filter.StartDate)
+		query = query.Where("transaction_date >= CAST(? AS date)", utils.DateOnly(*filter.StartDate))
 	}
 	if filter.EndDate != nil {
-		query = query.Where("transaction_date <= ?", *filter.EndDate)
+		query = query.Where("transaction_date <= CAST(? AS date)", utils.DateOnly(*filter.EndDate))
 	}
 
 	err := query.Order("transaction_date DESC, created_at DESC").Find(&transactions).Error
