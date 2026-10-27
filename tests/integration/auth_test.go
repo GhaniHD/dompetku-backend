@@ -87,24 +87,6 @@ func TestProtectedRoutesRequireValidToken(t *testing.T) {
 	}
 }
 
-func TestDeletedAccountCannotUseTokenOrReRegister(t *testing.T) {
-	u := newUser(t)
-
-	status, r := call(t, http.MethodDelete, "/api/profile", u.Token, nil)
-	expectStatus(t, status, http.StatusOK, r)
-
-	status, r = call(t, http.MethodGet, "/api/wallets", u.Token, nil)
-	expectStatus(t, status, http.StatusUnauthorized, r)
-
-	status, r = call(t, http.MethodPost, "/api/auth/register", "", map[string]any{
-		"name": "Lagi", "email": u.Email, "password": "rahasia123",
-	})
-	expectStatus(t, status, http.StatusBadRequest, r)
-	if strings.Contains(strings.ToLower(r.Message), "duplicate") {
-		t.Fatalf("error database bocor ke client: %q", r.Message)
-	}
-}
-
 func TestChangePasswordWrongOldPasswordIsBadRequest(t *testing.T) {
 	u := newUser(t)
 

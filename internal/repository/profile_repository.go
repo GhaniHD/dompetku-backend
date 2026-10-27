@@ -94,13 +94,11 @@ func (r *profileRepository) UpdateAvatar(ctx context.Context, id uuid.UUID, avat
 	return &user, nil
 }
 
+// DeleteAccount menghapus permanen akun beserta seluruh datanya.
 func (r *profileRepository) DeleteAccount(ctx context.Context, id uuid.UUID) error {
-	// Soft delete — GORM mengisi deleted_at secara otomatis.
-	// Semua relasi (Wallet, Transaction, dst) ikut terhapus karena
-	// constraint ON DELETE CASCADE di masing-masing model.
-	return r.db.WithContext(ctx).
-		Where("id = ?", id).
-		Delete(&model.User{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return PurgeUser(tx, id)
+	})
 }
 
 func (r *profileRepository) SumWalletBalance(ctx context.Context, userID uuid.UUID) (float64, error) {

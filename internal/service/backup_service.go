@@ -465,7 +465,7 @@ func (s *backupService) Restore(ctx context.Context, userID uuid.UUID, accountPa
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", userID).First(&locked).Error; err != nil {
 			return err
 		}
-		if err := wipeUserData(tx, userID); err != nil {
+		if err := repository.DeleteUserData(tx, userID); err != nil {
 			return err
 		}
 		ids, err := insertPayload(tx, userID, p)
@@ -496,20 +496,6 @@ func (s *backupService) Restore(ctx context.Context, userID uuid.UUID, accountPa
 		fmt.Sprintf("%d dompet dan %d transaksi dari backup %s berhasil dipulihkan.",
 			summary.Wallets, summary.Transactions, p.CreatedAt.In(jakarta).Format("02-01-2006 15:04")))
 	return summary, nil
-}
-
-// wipeUserData menghapus permanen data keuangan pengguna dengan urutan yang
-// aman terhadap foreign key. Profil, notifikasi, dan akun tidak disentuh.
-func wipeUserData(tx *gorm.DB, userID uuid.UUID) error {
-	for _, table := range []string{
-		"budgets", "goals", "debt_movements", "debts", "transfers",
-		"balance_adjustments", "transactions", "recurring_transactions", "wallets", "categories",
-	} {
-		if err := tx.Exec("DELETE FROM "+table+" WHERE user_id = ?", userID).Error; err != nil {
-			return fmt.Errorf("hapus %s: %w", table, err)
-		}
-	}
-	return nil
 }
 
 type idMap map[uuid.UUID]uuid.UUID

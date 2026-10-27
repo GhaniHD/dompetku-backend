@@ -21,6 +21,11 @@ type ChangePasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
 }
 
+// DeleteAccountRequest digunakan untuk DELETE /api/profile.
+type DeleteAccountRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
 // UpdateBudgetCycleRequest digunakan untuk PUT /api/profile/budget-cycle
 type UpdateBudgetCycleRequest struct {
 	StartDay int `json:"start_day" binding:"required,min=1,max=31"`

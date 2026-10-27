@@ -10,6 +10,7 @@ import (
 
 	"dompetku/internal/dto"
 	"dompetku/internal/model"
+	"dompetku/internal/repository"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -156,7 +157,8 @@ func (s *adminService) Activate(adminID, userID uuid.UUID) error {
 }
 
 func (s *adminService) Delete(adminID, userID uuid.UUID) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	var avatar string
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var user model.User
 		err := tx.Where("id = ?", userID).First(&user).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -168,11 +170,29 @@ func (s *adminService) Delete(adminID, userID uuid.UUID) error {
 		if user.Role == model.RoleAdmin || user.ID == adminID {
 			return ErrAdminProtected
 		}
-		if err := tx.Create(&model.AdminLog{AdminID: adminID, Action: "delete", TargetUserID: &userID, Detail: user.Email}).Error; err != nil {
+		if err := tx.Create(&model.AdminLog{AdminID: adminID, Action: "delete", TargetUserID: &userID, Detail: maskEmail(user.Email)}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&model.User{}, "id = ?", userID).Error
+		avatar = user.AvatarURL
+		return repository.PurgeUser(tx, userID)
 	})
+	if err == nil {
+		removeAvatar(avatar)
+	}
+	return err
+}
+
+// maskEmail menyamarkan email akun yang sudah dihapus permanen, misalnya gh***@gmail.com.
+func maskEmail(email string) string {
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return "***"
+	}
+	local := email[:at]
+	if len(local) > 2 {
+		local = local[:2]
+	}
+	return local + "***" + email[at:]
 }
 
 func randomToken(n int) (string, error) {

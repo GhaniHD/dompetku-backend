@@ -51,6 +51,10 @@ func profileErrResponse(c *gin.Context, err error) {
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrInvalidFileType):
 		errorResponse(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrDeletePassword):
+		errorResponse(c, http.StatusForbidden, err.Error())
+	case errors.Is(err, service.ErrAdminCannotDelete):
+		errorResponse(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, service.ErrDailyCategory):
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrFileTooLarge):
@@ -164,12 +168,17 @@ func (h *ProfileHandler) DeleteAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.profileService.DeleteAccount(c.Request.Context(), userID); err != nil {
+	var req dto.DeleteAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "masukkan password untuk menghapus akun")
+		return
+	}
+	if err := h.profileService.DeleteAccount(c.Request.Context(), userID, req.Password); err != nil {
 		profileErrResponse(c, err)
 		return
 	}
 
-	successResponse(c, http.StatusOK, "akun berhasil dihapus", nil)
+	successResponse(c, http.StatusOK, "akun dan semua datanya sudah dihapus permanen", nil)
 }
 
 // PUT /api/profile/income

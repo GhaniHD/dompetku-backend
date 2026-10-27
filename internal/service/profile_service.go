@@ -29,12 +29,14 @@ import (
 
 // ─── Sentinel errors (bisa ditangkap di handler dengan errors.Is) ─────────────
 var (
-	ErrEmailAlreadyUsed = errors.New("email sudah digunakan akun lain")
-	ErrWrongPassword    = errors.New("password lama tidak sesuai")
-	ErrUserNotFound     = errors.New("user tidak ditemukan")
-	ErrInvalidFileType  = errors.New("format tidak didukung, gunakan JPG PNG atau WebP")
-	ErrFileTooLarge     = errors.New("ukuran file maksimal 2 MB")
-	ErrDailyCategory    = errors.New("kategori jatah harian harus kategori pengeluaran milikmu")
+	ErrEmailAlreadyUsed  = errors.New("email sudah digunakan akun lain")
+	ErrWrongPassword     = errors.New("password lama tidak sesuai")
+	ErrUserNotFound      = errors.New("user tidak ditemukan")
+	ErrInvalidFileType   = errors.New("format tidak didukung, gunakan JPG PNG atau WebP")
+	ErrFileTooLarge      = errors.New("ukuran file maksimal 2 MB")
+	ErrDailyCategory     = errors.New("kategori jatah harian harus kategori pengeluaran milikmu")
+	ErrDeletePassword    = errors.New("password salah, akun tidak dihapus")
+	ErrAdminCannotDelete = errors.New("akun admin tidak bisa dihapus dari profil")
 )
 
 type ProfileService interface {
@@ -42,7 +44,7 @@ type ProfileService interface {
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req *dto.UpdateProfileRequest) (*dto.ProfileResponse, error)
 	ChangePassword(ctx context.Context, userID uuid.UUID, req *dto.ChangePasswordRequest) error
 	UploadAvatar(ctx context.Context, userID uuid.UUID, file *multipart.FileHeader) (*dto.AvatarResponse, error)
-	DeleteAccount(ctx context.Context, userID uuid.UUID) error
+	DeleteAccount(ctx context.Context, userID uuid.UUID, password string) error
 	UpdateBudgetCycle(ctx context.Context, userID uuid.UUID, req *dto.UpdateBudgetCycleRequest) (*dto.ProfileResponse, error)
 	UpdateIncome(ctx context.Context, userID uuid.UUID, req *dto.UpdateIncomeRequest) (*dto.ProfileResponse, error)
 	UpdateDailyCategories(ctx context.Context, userID uuid.UUID, req *dto.UpdateDailyCategoriesRequest) (*dto.ProfileResponse, error)
@@ -220,18 +222,28 @@ func (s *profileService) UploadAvatar(ctx context.Context, userID uuid.UUID, fil
 
 // ─── DeleteAccount ────────────────────────────────────────────────────────────
 
-func (s *profileService) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+func (s *profileService) DeleteAccount(ctx context.Context, userID uuid.UUID, password string) error {
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil || user == nil {
 		return ErrUserNotFound
 	}
-
-	// Hapus avatar dari disk jika ada
-	if user.AvatarURL != "" {
-		os.Remove("." + user.AvatarURL)
+	if user.Role == model.RoleAdmin {
+		return ErrAdminCannotDelete
 	}
+	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)) != nil {
+		return ErrDeletePassword
+	}
+	if err := s.profileRepo.DeleteAccount(ctx, userID); err != nil {
+		return err
+	}
+	removeAvatar(user.AvatarURL)
+	return nil
+}
 
-	return s.profileRepo.DeleteAccount(ctx, userID)
+func removeAvatar(url string) {
+	if url != "" {
+		os.Remove("." + url)
+	}
 }
 
 func incomeTypeOf(user *model.User) string {
