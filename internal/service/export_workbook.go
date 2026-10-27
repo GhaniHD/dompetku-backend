@@ -308,7 +308,7 @@ func (sh *sheet) layout(landscape bool) {
 		sh.err = sh.f.SetSheetProps(sh.name, &excelize.SheetPropsOptions{FitToPage: &fit, TabColorRGB: strPtr(brand)})
 	}
 	if sh.err == nil {
-		sh.err = sh.f.SetHeaderFooter(sh.name, &excelize.HeaderFooterOptions{OddFooter: "&LDompetKu&CHalaman &P dari &N&R&A"})
+		sh.err = sh.f.SetHeaderFooter(sh.name, &excelize.HeaderFooterOptions{OddFooter: "&LMyFulus&CHalaman &P dari &N&R&A"})
 	}
 }
 
@@ -444,16 +444,16 @@ func renderWorkbook(d *reportData) (*excelize.File, error) {
 
 	f.SetActiveSheet(0)
 	_ = f.SetDocProps(&excelize.DocProperties{
-		Title:   "Laporan Keuangan DompetKu",
+		Title:   "Laporan Keuangan MyFulus",
 		Subject: period,
-		Creator: "DompetKu",
+		Creator: "MyFulus",
 		Created: d.GeneratedAt.UTC().Format(time.RFC3339),
 	})
 	return f, nil
 }
 
 func renderSummary(sh *sheet, d *reportData, period string, flows map[uuid.UUID]*walletFlow, txs []repository.ExportEntry, cats map[string]*categoryStat) {
-	sh.heading("Laporan Keuangan DompetKu", fmt.Sprintf("%s (%s). %s. Dibuat %s %02d:%02d WIB.",
+	sh.heading("Laporan Keuangan MyFulus", fmt.Sprintf("%s (%s). %s. Dibuat %s %02d:%02d WIB.",
 		d.User.Name, d.User.Email, period, idDate(d.GeneratedAt), d.GeneratedAt.Hour(), d.GeneratedAt.Minute()))
 
 	var income, expense, fees float64

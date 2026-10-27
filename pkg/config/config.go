@@ -51,7 +51,7 @@ func NewAppConf() (*AppConf, error) {
 		ClaudeModel:    getEnv("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
 		ClaudeAPIURL:   getEnv("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
 		AdminEmails:    splitList(os.Getenv("ADMIN_EMAILS"), true),
-		CORSOrigins:    splitList(getEnv("CORS_ORIGINS", "http://localhost:5173,https://dompetku-new.vercel.app"), false),
+		CORSOrigins:    splitList(getEnv("CORS_ORIGINS", "http://localhost:5173,https://myfulus.my.id,https://www.myfulus.my.id,https://dompetku-new.vercel.app"), false),
 		TrustedProxies: splitList(getEnv("TRUSTED_PROXIES", "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"), false),
 	}
 

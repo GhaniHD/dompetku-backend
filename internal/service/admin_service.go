@@ -127,7 +127,7 @@ func (s *adminService) Approve(adminID, userID uuid.UUID) error {
 		return map[string]any{"status": model.UserActive, "status_reason": "", "approved_at": s.now(), "approved_by": adminID}
 	}, "")
 	if err == nil {
-		_ = s.notif.CreateSystem(user.ID, "Akun disetujui", "Selamat datang di DompetKu! Mulai dengan menambahkan dompet pertamamu.")
+		_ = s.notif.CreateSystem(user.ID, "Akun disetujui", "Selamat datang di MyFulus! Mulai dengan menambahkan dompet pertamamu.")
 	}
 	return err
 }

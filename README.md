@@ -1,6 +1,6 @@
-# Dompetku — Backend
+# MyFulus — Backend
 
-Backend API untuk **Dompetku**, aplikasi pencatatan keuangan pribadi
+Backend API untuk **MyFulus** (sebelumnya Dompetku), aplikasi pencatatan keuangan pribadi
 (personal finance tracker): wallet, transaksi, kategori, budget, laporan, dan
 analisis keuangan berbasis AI. Dibangun dengan **Go + Gin + GORM +
 PostgreSQL**, memakai **Uber FX** untuk dependency injection antar layer

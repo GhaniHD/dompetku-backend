@@ -97,7 +97,7 @@ func (s *exportService) SingleSheet(userID uuid.UUID, kind string, start, end *t
 	var render func(sh *sheet) error
 	switch kind {
 	case SheetTransactions:
-		sheetName, prefix = "Transaksi", "dompetku-transaksi"
+		sheetName, prefix = "Transaksi", "myfulus-transaksi"
 		render = func(sh *sheet) error {
 			entries, err := s.repo.Entries(userID, startStr, endStr)
 			if err != nil {
@@ -113,7 +113,7 @@ func (s *exportService) SingleSheet(userID uuid.UUID, kind string, start, end *t
 			return nil
 		}
 	case SheetTransfers:
-		sheetName, prefix = "Pindahan", "dompetku-pindahan"
+		sheetName, prefix = "Pindahan", "myfulus-pindahan"
 		render = func(sh *sheet) error {
 			endOfDay := to.Add(24*time.Hour - time.Second)
 			transfers, err := s.transferRepo.FindAll(userID, dto.TransferFilterRequest{StartDate: &from, EndDate: &endOfDay})
@@ -141,12 +141,12 @@ func (s *exportService) SingleSheet(userID uuid.UUID, kind string, start, end *t
 	if sh.err != nil {
 		return nil, "", fmt.Errorf("sheet %s: %w", sheetName, sh.err)
 	}
-	_ = f.SetDocProps(&excelize.DocProperties{Title: sheetName + " DompetKu", Creator: "DompetKu", Created: now.UTC().Format(time.RFC3339)})
+	_ = f.SetDocProps(&excelize.DocProperties{Title: sheetName + " MyFulus", Creator: "MyFulus", Created: now.UTC().Format(time.RFC3339)})
 	return f, fmt.Sprintf("%s_%s_%s.xlsx", prefix, startStr, endStr), nil
 }
 
 func renderTransactionsSheet(sh *sheet, names map[uuid.UUID]string, subtitle string, txs []repository.ExportEntry) {
-	sh.heading("Transaksi DompetKu", subtitle)
+	sh.heading("Transaksi MyFulus", subtitle)
 	sh.row = 3
 	sh.kpis([]kpi{
 		{"Jumlah transaksi", "SUBTOTAL(103,Transaksi[Tanggal])", 1, 2, false},
@@ -179,7 +179,7 @@ func renderTransactionsSheet(sh *sheet, names map[uuid.UUID]string, subtitle str
 }
 
 func renderTransfersSheet(sh *sheet, names map[uuid.UUID]string, subtitle string, transfers []model.Transfer) {
-	sh.heading("Pindahan DompetKu", subtitle+" Pindahan bukan pemasukan/pengeluaran; biaya admin dihitung sebagai pengeluaran.")
+	sh.heading("Pindahan MyFulus", subtitle+" Pindahan bukan pemasukan/pengeluaran; biaya admin dihitung sebagai pengeluaran.")
 	sh.row = 3
 	sh.kpis([]kpi{
 		{"Jumlah pindahan", "SUBTOTAL(103,Pindahan[Tanggal])", 1, 2, false},

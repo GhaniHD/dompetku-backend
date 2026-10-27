@@ -205,6 +205,6 @@ func (s *exportService) Workbook(userID uuid.UUID, start, end *time.Time) (*exce
 	if err != nil {
 		return nil, "", err
 	}
-	name := fmt.Sprintf("dompetku-laporan_%s_%s.xlsx", startStr, endStr)
+	name := fmt.Sprintf("myfulus-laporan_%s_%s.xlsx", startStr, endStr)
 	return f, name, nil
 }

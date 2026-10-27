@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	// Penanda format di dalam file terenkripsi; jangan diubah agar backup lama tetap terbaca.
 	backupFormat  = "dompetku-backup"
 	backupVersion = 1
 	// RestoreConfirmWord wajib diketik pengguna sebelum data diganti.
@@ -29,7 +30,7 @@ const (
 
 var (
 	ErrBackupAccountPassword = errors.New("password akun salah")
-	ErrBackupFormat          = errors.New("file bukan backup DompetKu atau versinya tidak didukung")
+	ErrBackupFormat          = errors.New("file bukan backup MyFulus atau versinya tidak didukung")
 	ErrBackupInvalid         = errors.New("isi backup tidak lengkap atau rusak")
 	ErrBackupConfirm         = errors.New("ketik GANTI untuk mengganti semua data akun ini")
 	ErrBackupMismatch        = errors.New("saldo hasil pemulihan tidak cocok dengan backup, pemulihan dibatalkan")
@@ -242,7 +243,7 @@ func (s *backupService) Export(ctx context.Context, userID uuid.UUID, req dto.Ba
 	if err != nil {
 		return nil, "", err
 	}
-	name := fmt.Sprintf("dompetku-backup-%s.dpk", p.CreatedAt.In(jakarta).Format("2006-01-02"))
+	name := fmt.Sprintf("myfulus-backup-%s.dpk", p.CreatedAt.In(jakarta).Format("2006-01-02"))
 	return sealed, name, nil
 }
 

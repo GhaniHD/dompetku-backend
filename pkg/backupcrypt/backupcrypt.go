@@ -1,4 +1,4 @@
-// Package backupcrypt mengenkripsi file backup DompetKu dengan password.
+// Package backupcrypt mengenkripsi file backup MyFulus dengan password.
 //
 // Format: "DPKB1" | salt (16) | nonce (12) | AES-256-GCM(gzip(isi)).
 // Kunci diturunkan dengan Argon2id; tag GCM sekaligus mendeteksi file yang diubah.
@@ -26,7 +26,7 @@ const (
 )
 
 var (
-	ErrNotBackup = errors.New("file bukan backup DompetKu")
+	ErrNotBackup = errors.New("file bukan backup MyFulus")
 	ErrDecrypt   = errors.New("password backup salah atau file rusak")
 	ErrTooLarge  = errors.New("isi backup terlalu besar")
 )
