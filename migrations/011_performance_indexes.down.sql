@@ -1,0 +1,11 @@
+DROP INDEX IF EXISTS idx_transactions_user_date;
+DROP INDEX IF EXISTS idx_transactions_wallet_date;
+DROP INDEX IF EXISTS idx_transactions_user_category_date;
+DROP INDEX IF EXISTS idx_transfers_fee_transaction;
+DROP INDEX IF EXISTS idx_balance_adjustments_user_date;
+DROP INDEX IF EXISTS idx_debt_movements_user_date;
+DROP INDEX IF EXISTS idx_wallets_user;
+DROP INDEX IF EXISTS idx_categories_user;
+DROP INDEX IF EXISTS idx_budgets_user_period;
+DROP INDEX IF EXISTS idx_notifications_user_created;
+DROP INDEX IF EXISTS idx_users_email_lower;

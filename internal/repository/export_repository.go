@@ -42,6 +42,9 @@ type ExportRepository interface {
 	Entries(userID uuid.UUID, start, end string) ([]ExportEntry, error)
 	// BalancesBefore mengembalikan saldo tiap dompet sebelum tanggal start.
 	BalancesBefore(userID uuid.UUID, start string) (map[uuid.UUID]float64, error)
+	// WalletDeltas menjumlahkan perubahan saldo tiap dompet pada rentang
+	// [from, to); from kosong berarti sejak awal.
+	WalletDeltas(userID uuid.UUID, from, to string) (map[uuid.UUID]float64, error)
 	DebtMovements(userID uuid.UUID, start, end string) ([]ExportDebtMovement, error)
 }
 
@@ -94,24 +97,64 @@ func (r *exportRepository) Entries(userID uuid.UUID, start, end string) ([]Expor
 	return rows, err
 }
 
-func (r *exportRepository) BalancesBefore(userID uuid.UUID, start string) (map[uuid.UUID]float64, error) {
+// walletDeltasSQL hanya menjumlahkan mutasi per dompet, tanpa join kategori
+// atau penanda biaya admin, agar perhitungan saldo tetap ringan.
+const walletDeltasSQL = `
+	SELECT wallet_id, SUM(delta) AS delta FROM (
+		SELECT wallet_id, CASE WHEN type = 'income' THEN amount ELSE -amount END AS delta
+		FROM transactions
+		WHERE user_id = @user AND deleted_at IS NULL AND transaction_date >= @from AND transaction_date < @to
+		UNION ALL
+		SELECT from_wallet_id, -amount FROM transfers
+		WHERE user_id = @user AND deleted_at IS NULL AND transfer_date >= @from AND transfer_date < @to
+		UNION ALL
+		SELECT to_wallet_id, amount FROM transfers
+		WHERE user_id = @user AND deleted_at IS NULL AND transfer_date >= @from AND transfer_date < @to
+		UNION ALL
+		SELECT wallet_id, amount FROM balance_adjustments
+		WHERE user_id = @user AND deleted_at IS NULL AND adjusted_at >= @from AND adjusted_at < @to
+		UNION ALL
+		SELECT wallet_id, wallet_delta FROM debt_movements
+		WHERE user_id = @user AND deleted_at IS NULL AND wallet_id IS NOT NULL AND wallet_delta <> 0
+		  AND movement_date >= @from AND movement_date < @to
+	) m GROUP BY wallet_id`
+
+func (r *exportRepository) WalletDeltas(userID uuid.UUID, from, to string) (map[uuid.UUID]float64, error) {
+	if from == "" {
+		from = "0001-01-01"
+	}
 	type row struct {
-		ID      uuid.UUID
-		Balance float64
+		WalletID uuid.UUID
+		Delta    float64
 	}
 	var rows []row
-	err := r.db.Raw(`SELECT w.id, w.opening_balance + COALESCE((
-			SELECT SUM(e.amount) FROM (`+userEntriesSQL+`) e
-			WHERE e.wallet_id = w.id AND e.date < CAST(@start AS date)
-		), 0) AS balance
-		FROM wallets w WHERE w.user_id = @user`,
-		map[string]any{"user": userID, "start": start}).Scan(&rows).Error
+	err := r.db.Raw(walletDeltasSQL, map[string]any{"user": userID, "from": from, "to": to}).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[uuid.UUID]float64, len(rows))
 	for _, rw := range rows {
-		out[rw.ID] = rw.Balance
+		out[rw.WalletID] = rw.Delta
+	}
+	return out, nil
+}
+
+func (r *exportRepository) BalancesBefore(userID uuid.UUID, start string) (map[uuid.UUID]float64, error) {
+	deltas, err := r.WalletDeltas(userID, "", start)
+	if err != nil {
+		return nil, err
+	}
+	type row struct {
+		ID             uuid.UUID
+		OpeningBalance float64
+	}
+	var wallets []row
+	if err := r.db.Raw(`SELECT id, opening_balance FROM wallets WHERE user_id = ?`, userID).Scan(&wallets).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]float64, len(wallets))
+	for _, w := range wallets {
+		out[w.ID] = w.OpeningBalance + deltas[w.ID]
 	}
 	return out, nil
 }

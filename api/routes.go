@@ -53,6 +53,7 @@ func NewRouter(
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORSMiddleware(cfg))
 	r.Use(middleware.BodyLimit(1<<20, 3<<20))
+	r.Use(middleware.Gzip())
 	r.Static("/uploads", "./uploads")
 
 	r.GET("/health", func(c *gin.Context) {
