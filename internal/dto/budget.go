@@ -5,12 +5,16 @@ import "github.com/google/uuid"
 // ─── Request DTO ──────────────────────────────────────────────────────────────
 
 // CreateBudgetRequest digunakan untuk membuat anggaran baru
+// Kind "expense" (default) wajib category_id; "savings" wajib goal_id atau wallet_id.
 type CreateBudgetRequest struct {
-	CategoryID uuid.UUID `json:"category_id" binding:"required"`
-	Amount     float64   `json:"amount"      binding:"required,gt=0"`
-	Month      int       `json:"month"       binding:"required,min=1,max=12"`
-	Year       int       `json:"year"        binding:"required,min=2000"`
-	Notes      string    `json:"notes"`
+	Kind       string     `json:"kind"        binding:"omitempty,oneof=expense savings"`
+	CategoryID *uuid.UUID `json:"category_id"`
+	WalletID   *uuid.UUID `json:"wallet_id"`
+	GoalID     *uuid.UUID `json:"goal_id"`
+	Amount     float64    `json:"amount"      binding:"required,gt=0"`
+	Month      int        `json:"month"       binding:"required,min=1,max=12"`
+	Year       int        `json:"year"        binding:"required,min=2000"`
+	Notes      string     `json:"notes"`
 }
 
 // UpdateBudgetRequest digunakan untuk mengubah anggaran (semua field opsional)
@@ -46,16 +50,28 @@ type BudgetResponse struct {
 	PeriodStart string `json:"period_start"`
 	PeriodEnd   string `json:"period_end"`
 
+	Kind     string `json:"kind"`
 	Category struct {
 		ID   uuid.UUID `json:"id"`
 		Name string    `json:"name"`
 	} `json:"category"`
+	// Wallet dan Goal hanya terisi untuk anggaran tabungan.
+	Wallet *BudgetRef `json:"wallet,omitempty"`
+	Goal   *BudgetRef `json:"goal,omitempty"`
 
-	Amount  float64 `json:"amount"`   // anggaran yang ditetapkan
-	Spent   float64 `json:"spent"`    // total pengeluaran aktual dari transaksi
-	Remain  float64 `json:"remain"`   // sisa anggaran (amount - spent)
-	UsedPct float64 `json:"used_pct"` // persentase penggunaan (0–100+)
-	Status  string  `json:"status"`   // "on_track" | "warning" | "over_budget"
+	// Untuk tabungan: Amount = rencana setoran, Spent = setoran bersih periode ini
+	// (uang masuk − keluar dompet tabungan), Remain = sisa setor.
+	Amount  float64 `json:"amount"`
+	Spent   float64 `json:"spent"`
+	Remain  float64 `json:"remain"`
+	UsedPct float64 `json:"used_pct"`
+	// expense: on_track | warning | used_up | over_budget; savings: in_progress | achieved
+	Status string `json:"status"`
+}
+
+type BudgetRef struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }
 
 // BudgetSummaryResponse adalah ringkasan semua anggaran dalam satu bulan/tahun
@@ -70,27 +86,11 @@ type BudgetSummaryResponse struct {
 	TotalRemain float64          `json:"total_remain"`
 	Budgets     []BudgetResponse `json:"budgets"`
 
-	Savings          []SavingsPlanResponse `json:"savings"`
-	SavingsPlanned   float64               `json:"savings_planned"`
-	SavingsDeposited float64               `json:"savings_deposited"`
+	// Total di atas hanya anggaran pengeluaran; tabungan dijumlah terpisah.
+	SavingsPlanned   float64 `json:"savings_planned"`
+	SavingsDeposited float64 `json:"savings_deposited"`
 	// FreeMoney hanya diisi untuk periode yang sedang berjalan.
 	FreeMoney *FreeMoneyResponse `json:"free_money,omitempty"`
-}
-
-// SavingsPlanResponse adalah satu target tabungan sebagai baris anggaran.
-// Planned dihitung dari sisa target di awal periode dibagi sisa bulan ke tenggat;
-// 0 bila target tidak punya tenggat. Deposited = perubahan saldo dompet target
-// selama periode.
-type SavingsPlanResponse struct {
-	GoalID     uuid.UUID `json:"goal_id"`
-	Name       string    `json:"name"`
-	WalletID   uuid.UUID `json:"wallet_id"`
-	WalletName string    `json:"wallet_name"`
-	Planned    float64   `json:"planned"`
-	Deposited  float64   `json:"deposited"`
-	Remain     float64   `json:"remain"`
-	Deadline   *string   `json:"deadline"`
-	Achieved   bool      `json:"achieved"`
 }
 
 // FreeMoneyResponse: uang yang benar-benar bebas dipakai setelah menyisihkan

@@ -96,6 +96,8 @@ func TestDataIsolation(t *testing.T) {
 		"transaksi kategori A":       {"/api/transactions", txBody(bWallet, food, 1_000, "expense")},
 		"pindahan ke dompet A":       {"/api/transfers", transferBody(bWallet, wallet, 1_000, 0)},
 		"pindahan dari dompet A":     {"/api/transfers", transferBody(wallet, bWallet, 1_000, 0)},
+		"anggaran tabungan dompet A": {"/api/budgets", map[string]any{"kind": "savings", "wallet_id": savings, "amount": 1_000, "month": 10, "year": 2026}},
+		"anggaran tabungan target A": {"/api/budgets", map[string]any{"kind": "savings", "goal_id": goal, "amount": 1_000, "month": 10, "year": 2026}},
 		"anggaran kategori A":        {"/api/budgets", map[string]any{"category_id": food, "amount": 1_000, "month": 10, "year": 2026}},
 		"transaksi rutin dompet A":   {"/api/recurring", recurringBody(wallet, bFood, "expense", "monthly", 1_000, todayWIB())},
 		"target memakai dompet A":    {"/api/goals", map[string]any{"name": "X", "target_amount": 1_000, "wallet_id": savings}},

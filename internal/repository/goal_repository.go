@@ -26,6 +26,8 @@ type GoalRepository interface {
 	// MarkAchieved menandai target pada wallet yang saldonya kini >= target dan
 	// belum pernah tercapai. Satu UPDATE sehingga notifikasi tidak terkirim ganda.
 	MarkAchieved(walletID uuid.UUID, balance float64, at time.Time) ([]AchievedGoal, error)
+	// ResetAchieved membatalkan status tercapai bila saldo turun lagi di bawah target.
+	ResetAchieved(walletID uuid.UUID, balance float64) error
 }
 
 type goalRepository struct {
@@ -89,4 +91,9 @@ func (r *goalRepository) MarkAchieved(walletID uuid.UUID, balance float64, at ti
 		WHERE wallet_id = ? AND deleted_at IS NULL AND achieved_at IS NULL AND target_amount <= ?
 		RETURNING id, user_id, name, target_amount`, at, walletID, balance).Scan(&rows).Error
 	return rows, err
+}
+
+func (r *goalRepository) ResetAchieved(walletID uuid.UUID, balance float64) error {
+	return r.db.Exec(`UPDATE goals SET achieved_at = NULL
+		WHERE wallet_id = ? AND deleted_at IS NULL AND achieved_at IS NOT NULL AND target_amount > ?`, walletID, balance).Error
 }

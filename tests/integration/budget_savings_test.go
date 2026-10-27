@@ -7,15 +7,30 @@ import (
 	"time"
 )
 
+type budgetLine struct {
+	ID       string  `json:"id"`
+	Kind     string  `json:"kind"`
+	Amount   float64 `json:"amount"`
+	Spent    float64 `json:"spent"`
+	Remain   float64 `json:"remain"`
+	Status   string  `json:"status"`
+	Category struct {
+		Name string `json:"name"`
+	} `json:"category"`
+	Wallet *struct {
+		Name string `json:"name"`
+	} `json:"wallet"`
+	Goal *struct {
+		Name string `json:"name"`
+	} `json:"goal"`
+}
+
 type budgetPlan struct {
-	Savings []struct {
-		Name      string  `json:"name"`
-		Planned   float64 `json:"planned"`
-		Deposited float64 `json:"deposited"`
-		Remain    float64 `json:"remain"`
-	} `json:"savings"`
-	SavingsPlanned   float64 `json:"savings_planned"`
-	SavingsDeposited float64 `json:"savings_deposited"`
+	TotalBudget      float64      `json:"total_budget"`
+	TotalSpent       float64      `json:"total_spent"`
+	Budgets          []budgetLine `json:"budgets"`
+	SavingsPlanned   float64      `json:"savings_planned"`
+	SavingsDeposited float64      `json:"savings_deposited"`
 	FreeMoney        *struct {
 		Spendable   float64 `json:"spendable"`
 		BudgetLeft  float64 `json:"budget_left"`
@@ -24,67 +39,143 @@ type budgetPlan struct {
 	} `json:"free_money"`
 }
 
-func TestSavingsInBudget(t *testing.T) {
+func budgetsFor(t *testing.T, u testUser, month time.Month, year int) budgetPlan {
+	t.Helper()
+	status, r := call(t, http.MethodGet, fmt.Sprintf("/api/budgets?month=%d&year=%d", month, year), u.Token, nil)
+	expectStatus(t, status, http.StatusOK, r)
+	return decode[budgetPlan](t, r)
+}
+
+func (p budgetPlan) line(t *testing.T, name string) budgetLine {
+	t.Helper()
+	for _, b := range p.Budgets {
+		switch {
+		case b.Goal != nil && b.Goal.Name == name, b.Wallet != nil && b.Goal == nil && b.Wallet.Name == name, b.Category.Name == name:
+			return b
+		}
+	}
+	t.Fatalf("baris anggaran %q tidak ada: %+v", name, p.Budgets)
+	return budgetLine{}
+}
+
+func TestSavingsBudget(t *testing.T) {
 	u := newUser(t)
 	bca := createTypedWallet(t, u, "BCA", "bank", 5_000_000)
 	phone := createTypedWallet(t, u, "Tabungan HP", "savings", 1_000_000)
-	trip := createTypedWallet(t, u, "Tabungan Liburan", "savings", 0)
+	cold := createTypedWallet(t, u, "Tabungan Dingin", "savings", 500_000)
+	card := createTypedWallet(t, u, "Kartu Kredit", "credit_card", 0)
 	food := createCategory(t, u, "Makan", "expense")
+	transport := createCategory(t, u, "Transportasi", "expense")
+	needs := createCategory(t, u, "Keperluan", "expense")
+
+	status, r := call(t, http.MethodPost, "/api/goals", u.Token, map[string]any{"name": "HP baru", "target_amount": 4_000_000, "wallet_id": phone})
+	expectStatus(t, status, http.StatusCreated, r)
+	goal := decode[idResponse](t, r).ID
 
 	now := todayWIB()
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-	deadline := monthStart.AddDate(0, 3, 0).Format("2006-01-02") + "T00:00:00+07:00"
-	status, r := call(t, http.MethodPost, "/api/goals", u.Token, map[string]any{
-		"name": "HP baru", "target_amount": 4_000_000, "wallet_id": phone, "deadline": deadline,
-	})
-	expectStatus(t, status, http.StatusCreated, r)
-	status, r = call(t, http.MethodPost, "/api/goals", u.Token, map[string]any{
-		"name": "Liburan", "target_amount": 3_000_000, "wallet_id": trip,
-	})
-	expectStatus(t, status, http.StatusCreated, r)
-
-	createBudgetFor(t, u, food, 1_000_000, int(now.Month()), now.Year())
+	month, year := int(now.Month()), now.Year()
 	day := now.Format("2006-01-02")
+	createBudgetFor(t, u, food, 1_000_000, month, year)
+	createBudgetFor(t, u, transport, 100_000, month, year)
+
+	newSavings := func(body map[string]any) (int, apiResponse) {
+		body["kind"], body["month"], body["year"] = "savings", month, year
+		return call(t, http.MethodPost, "/api/budgets", u.Token, body)
+	}
+	status, r = newSavings(map[string]any{"goal_id": goal, "amount": 1_000_000})
+	expectStatus(t, status, http.StatusCreated, r)
+	status, r = newSavings(map[string]any{"wallet_id": cold, "amount": 300_000})
+	expectStatus(t, status, http.StatusCreated, r)
+
+	for name, body := range map[string]map[string]any{
+		"dompet yang sama dua kali": {"wallet_id": phone, "amount": 1},
+		"kartu kredit":              {"wallet_id": card, "amount": 1},
+		"tanpa tujuan":              {"amount": 1},
+	} {
+		if status, r := newSavings(body); status != http.StatusBadRequest {
+			t.Errorf("%s: status %d (%s), ingin 400", name, status, r.Message)
+		}
+	}
+
 	expenseOn(t, u, bca, food, 250_000, day)
+	expenseOn(t, u, bca, transport, 100_000, day)
 	transferOn(t, u, bca, phone, 400_000, 0, day)
-	transferOn(t, u, bca, trip, 100_000, 0, day)
+	expenseOn(t, u, cold, needs, 135_000, day)
 
-	status, r = call(t, http.MethodGet, "/api/budgets/current", u.Token, nil)
-	expectStatus(t, status, http.StatusOK, r)
-	plan := decode[budgetPlan](t, r)
-
-	if len(plan.Savings) != 2 {
-		t.Fatalf("%d baris tabungan, ingin 2: %+v", len(plan.Savings), plan.Savings)
+	plan := budgetsFor(t, u, now.Month(), year)
+	if plan.TotalBudget != 1_100_000 || plan.TotalSpent != 350_000 {
+		t.Fatalf("total anggaran pengeluaran %v/%v, ingin 1,1jt/350rb (tabungan tidak ikut)", plan.TotalSpent, plan.TotalBudget)
 	}
-	rows := map[string]int{}
-	for i, s := range plan.Savings {
-		rows[s.Name] = i
+	if got := plan.line(t, "Transportasi").Status; got != "used_up" {
+		t.Errorf("anggaran pas habis berstatus %q, ingin used_up", got)
 	}
-	hp := plan.Savings[rows["HP baru"]]
-	if hp.Planned != 1_000_000 || hp.Deposited != 400_000 || hp.Remain != 600_000 {
-		t.Fatalf("HP baru %+v, ingin rencana 1jt, setor 400rb, sisa 600rb", hp)
+	hp := plan.line(t, "HP baru")
+	if hp.Kind != "savings" || hp.Wallet == nil || hp.Wallet.Name != "Tabungan HP" || hp.Spent != 400_000 || hp.Remain != 600_000 || hp.Status != "in_progress" {
+		t.Fatalf("tabungan HP %+v", hp)
 	}
-	trip2 := plan.Savings[rows["Liburan"]]
-	if trip2.Planned != 0 || trip2.Deposited != 100_000 || trip2.Remain != 0 {
-		t.Fatalf("Liburan tanpa tenggat %+v", trip2)
+	dingin := plan.line(t, "Tabungan Dingin")
+	if dingin.Spent != -135_000 || dingin.Remain != 435_000 {
+		t.Fatalf("tabungan dingin setelah diambil 135rb: %+v, ingin setor -135rb sisa 435rb", dingin)
 	}
-	if plan.SavingsPlanned != 1_000_000 || plan.SavingsDeposited != 500_000 {
-		t.Fatalf("total tabungan %+v", plan)
+	if plan.SavingsPlanned != 1_300_000 || plan.SavingsDeposited != 265_000 {
+		t.Fatalf("total tabungan rencana %v disetor %v", plan.SavingsPlanned, plan.SavingsDeposited)
 	}
 
 	f := plan.FreeMoney
 	if f == nil {
 		t.Fatal("free_money kosong untuk periode berjalan")
 	}
-	// BCA 5jt − 250rb − 400rb − 100rb; dompet tabungan tidak dihitung.
-	if f.Spendable != 4_250_000 || f.BudgetLeft != 750_000 || f.SavingsLeft != 600_000 || f.Amount != 2_900_000 {
+	// BCA 5jt − 250rb − 100rb − 400rb; dompet tabungan tidak dihitung siap pakai.
+	if f.Spendable != 4_250_000 || f.BudgetLeft != 750_000 || f.SavingsLeft != 1_035_000 || f.Amount != 2_465_000 {
 		t.Fatalf("uang bebas %+v", *f)
 	}
 
-	prev := monthStart.AddDate(0, -1, 0)
-	status, r = call(t, http.MethodGet, fmt.Sprintf("/api/budgets?month=%d&year=%d", prev.Month(), prev.Year()), u.Token, nil)
-	expectStatus(t, status, http.StatusOK, r)
-	if past := decode[budgetPlan](t, r); past.FreeMoney != nil || len(past.Savings) != 0 {
-		t.Fatalf("periode lalu %+v, ingin tanpa uang bebas dan tanpa target yang belum dibuat", past)
+	transferOn(t, u, bca, phone, 700_000, 0, day)
+	if hp := budgetsFor(t, u, now.Month(), year).line(t, "HP baru"); hp.Status != "achieved" || hp.Remain != 0 {
+		t.Fatalf("setelah setor 1,1jt dari rencana 1jt: %+v", hp)
+	}
+
+	next := time.Date(year, now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	status, r = call(t, http.MethodPost, "/api/budgets/copy", u.Token, map[string]any{
+		"from_month": month, "from_year": year, "to_month": int(next.Month()), "to_year": next.Year(),
+	})
+	expectStatus(t, status, http.StatusCreated, r)
+	copied := budgetsFor(t, u, next.Month(), next.Year())
+	if len(copied.Budgets) != 4 || copied.SavingsPlanned != 1_300_000 || copied.FreeMoney != nil {
+		t.Fatalf("salinan periode berikut %+v, ingin 4 baris termasuk 2 tabungan dan tanpa uang bebas", copied)
+	}
+}
+
+func TestGoalAchievementFollowsBalance(t *testing.T) {
+	u := newUser(t)
+	bca := createTypedWallet(t, u, "BCA", "bank", 1_000_000)
+	small := createTypedWallet(t, u, "Tabungan Kecil", "savings", 0)
+	needs := createCategory(t, u, "Keperluan", "expense")
+	status, r := call(t, http.MethodPost, "/api/goals", u.Token, map[string]any{"name": "Kecil", "target_amount": 100_000, "wallet_id": small})
+	expectStatus(t, status, http.StatusCreated, r)
+	goal := decode[idResponse](t, r).ID
+
+	achieved := func() bool {
+		status, r := call(t, http.MethodGet, "/api/goals/"+goal, u.Token, nil)
+		expectStatus(t, status, http.StatusOK, r)
+		return decode[struct {
+			Achieved bool `json:"achieved"`
+		}](t, r).Achieved
+	}
+
+	createTransfer(t, u, bca, small, 100_000, 0)
+	if !achieved() {
+		t.Fatal("target belum tercapai setelah saldo = target")
+	}
+	createTransaction(t, u, small, needs, 30_000, "expense")
+	if achieved() {
+		t.Fatal("target masih tercapai setelah uangnya diambil")
+	}
+	createTransfer(t, u, bca, small, 30_000, 0)
+	if !achieved() {
+		t.Fatal("target tidak tercapai lagi setelah saldo kembali penuh")
+	}
+	if got := countTitles(t, u, "Target Tabungan Tercapai"); got != 2 {
+		t.Fatalf("notifikasi tercapai %d, ingin 2 (sekali per pencapaian)", got)
 	}
 }

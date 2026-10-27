@@ -14,6 +14,7 @@ type BudgetRepository interface {
 	FindByID(id uuid.UUID, userID uuid.UUID) (*model.Budget, error)
 	FindAll(userID uuid.UUID, month, year int) ([]model.Budget, error)
 	FindByCategory(userID uuid.UUID, categoryID uuid.UUID, month, year int) (*model.Budget, error)
+	FindSavingsByWallet(userID, walletID uuid.UUID, month, year int) (*model.Budget, error)
 	Update(budget *model.Budget) error
 	Delete(id uuid.UUID, userID uuid.UUID) error
 
@@ -67,6 +68,18 @@ func (r *budgetRepository) FindByCategory(userID uuid.UUID, categoryID uuid.UUID
 	err := r.db.
 		Where("user_id = ? AND category_id = ? AND month = ? AND year = ?",
 			userID, categoryID, month, year).
+		First(&budget).Error
+	if err != nil {
+		return nil, err
+	}
+	return &budget, nil
+}
+
+func (r *budgetRepository) FindSavingsByWallet(userID, walletID uuid.UUID, month, year int) (*model.Budget, error) {
+	var budget model.Budget
+	err := r.db.
+		Where("user_id = ? AND kind = ? AND wallet_id = ? AND month = ? AND year = ?",
+			userID, model.BudgetSavings, walletID, month, year).
 		First(&budget).Error
 	if err != nil {
 		return nil, err
