@@ -17,4 +17,5 @@ var Module = fx.Module("handler",
 	fx.Provide(NewRecurringHandler),
 	fx.Provide(NewDebtGoalHandler),
 	fx.Provide(NewAdminHandler),
+	fx.Provide(NewBackupHandler),
 )

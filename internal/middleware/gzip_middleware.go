@@ -32,12 +32,12 @@ func (w *gzipWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-// Gzip mengompres respons JSON API. File Excel tidak dikompres ulang karena
-// formatnya sudah berupa zip.
+// Gzip mengompres respons JSON API. File Excel dan backup tidak dikompres ulang
+// karena isinya sudah terkompresi.
 func Gzip() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
-		if !strings.HasPrefix(path, "/api/") || strings.HasSuffix(path, ".xlsx") ||
+		if !strings.HasPrefix(path, "/api/") || strings.HasSuffix(path, ".xlsx") || strings.HasPrefix(path, "/api/backup/") ||
 			!strings.Contains(c.GetHeader("Accept-Encoding"), "gzip") || c.Request.Method == http.MethodHead {
 			c.Next()
 			return
