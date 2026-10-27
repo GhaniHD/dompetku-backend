@@ -86,32 +86,20 @@ func (s *budgetService) GetCurrentBudgets(userID uuid.UUID) (*dto.BudgetSummaryR
 // ─── CreateBudget ─────────────────────────────────────────────────────────────
 
 func (s *budgetService) CreateBudget(userID uuid.UUID, req dto.CreateBudgetRequest) (*dto.BudgetResponse, error) {
-	category, err := s.categoryRepo.FindByID(req.CategoryID, userID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrCategoryNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if category.Type != "expense" {
-		return nil, ErrBudgetCategoryNotExpense
-	}
-
-	existing, err := s.budgetRepo.FindByCategory(userID, req.CategoryID, req.Month, req.Year)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	if existing != nil {
-		return nil, errors.New("anggaran untuk kategori ini sudah ada pada bulan dan tahun tersebut")
-	}
-
 	budget := &model.Budget{
-		UserID:     userID,
-		CategoryID: req.CategoryID,
-		Amount:     req.Amount,
-		Month:      req.Month,
-		Year:       req.Year,
-		Notes:      &req.Notes,
+		UserID: userID,
+		Kind:   model.BudgetExpense,
+		Amount: req.Amount,
+		Month:  req.Month,
+		Year:   req.Year,
+		Notes:  &req.Notes,
+	}
+	if req.Kind == model.BudgetSavings {
+		if err := s.prepareSavings(userID, budget, req.GoalID, req.WalletID); err != nil {
+			return nil, err
+		}
+	} else if err := s.prepareExpense(userID, budget, req.CategoryID); err != nil {
+		return nil, err
 	}
 
 	if err := s.budgetRepo.Create(budget); err != nil {
@@ -128,14 +116,84 @@ func (s *budgetService) CreateBudget(userID uuid.UUID, req dto.CreateBudgetReque
 		return nil, err
 	}
 
-	// ── Notifikasi: anggaran baru dibuat ──────────────────────────────
 	_ = s.notifSvc.CreateSystem(userID,
 		"Anggaran Dibuat 🎯",
 		fmt.Sprintf("Anggaran %s sebesar Rp %.0f berhasil dibuat untuk bulan %d/%d.",
-			created.Category.Name, req.Amount, req.Month, req.Year),
+			budgetName(resp), req.Amount, req.Month, req.Year),
 	)
 
 	return resp, nil
+}
+
+func (s *budgetService) prepareExpense(userID uuid.UUID, budget *model.Budget, categoryID *uuid.UUID) error {
+	if categoryID == nil {
+		return errors.New("kategori wajib dipilih untuk anggaran pengeluaran")
+	}
+	category, err := s.categoryRepo.FindByID(*categoryID, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrCategoryNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if category.Type != "expense" {
+		return ErrBudgetCategoryNotExpense
+	}
+	existing, err := s.budgetRepo.FindByCategory(userID, *categoryID, budget.Month, budget.Year)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if existing != nil {
+		return errors.New("anggaran untuk kategori ini sudah ada pada bulan dan tahun tersebut")
+	}
+	budget.CategoryID = categoryID
+	return nil
+}
+
+// prepareSavings mengisi dompet tujuan dari target (bila dipilih) atau dari
+// dompet yang dipilih langsung.
+func (s *budgetService) prepareSavings(userID uuid.UUID, budget *model.Budget, goalID, walletID *uuid.UUID) error {
+	budget.Kind = model.BudgetSavings
+	if goalID != nil {
+		goal, err := s.goalRepo.FindByID(*goalID, userID)
+		if err != nil {
+			return ErrGoalNotFound
+		}
+		budget.GoalID, walletID = &goal.ID, &goal.WalletID
+	}
+	if walletID == nil {
+		return errors.New("pilih target tabungan atau dompet tabungan")
+	}
+	wallet, err := s.walletRepo.FindByID(*walletID, userID)
+	if err != nil {
+		return ErrWalletNotFound
+	}
+	if wallet.IsArchived {
+		return ErrWalletArchived
+	}
+	if wallet.Type == model.WalletTypeCreditCard {
+		return errors.New("kartu kredit tidak bisa dipakai sebagai dompet tabungan")
+	}
+	existing, err := s.budgetRepo.FindSavingsByWallet(userID, wallet.ID, budget.Month, budget.Year)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if existing != nil {
+		return errors.New("anggaran tabungan untuk dompet ini sudah ada pada periode tersebut")
+	}
+	budget.WalletID = &wallet.ID
+	return nil
+}
+
+func budgetName(b *dto.BudgetResponse) string {
+	switch {
+	case b.Goal != nil:
+		return "tabungan " + b.Goal.Name
+	case b.Wallet != nil:
+		return "tabungan " + b.Wallet.Name
+	default:
+		return b.Category.Name
+	}
 }
 
 // ─── GetBudgetByID ────────────────────────────────────────────────────────────
@@ -164,45 +222,30 @@ func (s *budgetService) GetAllBudgets(userID uuid.UUID, filter dto.BudgetFilterR
 		return nil, err
 	}
 
-	var (
-		items       []dto.BudgetResponse
-		totalBudget float64
-		totalSpent  float64
-	)
-
-	for _, b := range budgets {
-		item, err := s.buildBudgetResponse(userID, &b, day)
+	lookup := s.newBudgetLookup(userID, day)
+	summary := &dto.BudgetSummaryResponse{Month: filter.Month, Year: filter.Year, StartDay: day, Budgets: []dto.BudgetResponse{}}
+	for i := range budgets {
+		item, err := s.buildBudgetResponse(userID, &budgets[i], day, lookup)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, *item)
-		totalBudget += b.Amount
-		totalSpent += item.Spent
+		summary.Budgets = append(summary.Budgets, *item)
+		if item.Kind == model.BudgetSavings {
+			summary.SavingsPlanned += item.Amount
+			summary.SavingsDeposited += item.Spent
+			continue
+		}
+		summary.TotalBudget += item.Amount
+		summary.TotalSpent += item.Spent
 	}
+	summary.TotalRemain = summary.TotalBudget - summary.TotalSpent
 
-	if items == nil {
-		items = []dto.BudgetResponse{}
-	}
-
-	summary := &dto.BudgetSummaryResponse{
-		Month:       filter.Month,
-		Year:        filter.Year,
-		StartDay:    day,
-		TotalBudget: totalBudget,
-		TotalSpent:  totalSpent,
-		TotalRemain: totalBudget - totalSpent,
-		Budgets:     items,
-	}
 	if filter.Month > 0 && filter.Year > 0 {
 		summary.PeriodStart, summary.PeriodEnd = periodLabels(day, filter.Year, filter.Month)
-		if err := s.addSavingsPlan(userID, day, summary); err != nil {
+		if err := s.addFreeMoney(userID, day, summary, lookup); err != nil {
 			return nil, err
 		}
 	}
-	if summary.Savings == nil {
-		summary.Savings = []dto.SavingsPlanResponse{}
-	}
-
 	return summary, nil
 }
 
@@ -241,7 +284,7 @@ func (s *budgetService) UpdateBudget(userID uuid.UUID, id uuid.UUID, req dto.Upd
 	}
 
 	// ── Notifikasi: anggaran diturunkan & sudah melebihi batas baru ───
-	if req.Amount > 0 && req.Amount < oldAmount && resp.UsedPct >= 100 {
+	if resp.Kind == model.BudgetExpense && req.Amount > 0 && req.Amount < oldAmount && resp.UsedPct >= 100 {
 		_ = s.notifSvc.CreateSystem(userID,
 			"Anggaran Terlampaui Setelah Perubahan ❗",
 			fmt.Sprintf("Anggaran %s dikurangi menjadi Rp %.0f, namun pengeluaran sudah Rp %.0f (%.0f%%).",
@@ -283,7 +326,13 @@ func (s *budgetService) CopyBudget(userID uuid.UUID, req dto.CopyBudgetRequest) 
 	var results []dto.BudgetResponse
 
 	for _, src := range sources {
-		existing, err := s.budgetRepo.FindByCategory(userID, src.CategoryID, req.ToMonth, req.ToYear)
+		var existing *model.Budget
+		var err error
+		if src.Kind == model.BudgetSavings {
+			existing, err = s.budgetRepo.FindSavingsByWallet(userID, *src.WalletID, req.ToMonth, req.ToYear)
+		} else {
+			existing, err = s.budgetRepo.FindByCategory(userID, *src.CategoryID, req.ToMonth, req.ToYear)
+		}
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
 		}
@@ -293,7 +342,10 @@ func (s *budgetService) CopyBudget(userID uuid.UUID, req dto.CopyBudgetRequest) 
 
 		newBudget := &model.Budget{
 			UserID:     userID,
+			Kind:       src.Kind,
 			CategoryID: src.CategoryID,
+			WalletID:   src.WalletID,
+			GoalID:     src.GoalID,
 			Amount:     src.Amount,
 			Month:      req.ToMonth,
 			Year:       req.ToYear,
@@ -344,52 +396,78 @@ func (s *budgetService) toBudgetResponse(userID uuid.UUID, b *model.Budget) (*dt
 	if err != nil {
 		return nil, err
 	}
-	return s.buildBudgetResponse(userID, b, day)
+	return s.buildBudgetResponse(userID, b, day, s.newBudgetLookup(userID, day))
 }
 
-func (s *budgetService) buildBudgetResponse(userID uuid.UUID, b *model.Budget, startDay int) (*dto.BudgetResponse, error) {
-	start, end := budgetcycle.Period(startDay, b.Year, b.Month)
-	spent, err := s.budgetRepo.GetSpentByCategory(userID, b.CategoryID, start, end)
-	if err != nil {
-		return nil, err
-	}
-
-	remain := b.Amount - spent
-	var usedPct float64
-	if b.Amount > 0 {
-		usedPct = math.Round((spent/b.Amount)*10000) / 100
-	}
-
-	status := budgetStatus(usedPct)
-
+func (s *budgetService) buildBudgetResponse(userID uuid.UUID, b *model.Budget, startDay int, lookup *budgetLookup) (*dto.BudgetResponse, error) {
 	notes := ""
 	if b.Notes != nil {
 		notes = *b.Notes
 	}
-
 	resp := &dto.BudgetResponse{
-		ID:      b.ID,
-		Month:   b.Month,
-		Year:    b.Year,
-		Notes:   notes,
-		Amount:  b.Amount,
-		Spent:   spent,
-		Remain:  remain,
-		UsedPct: usedPct,
-		Status:  status,
+		ID:     b.ID,
+		Month:  b.Month,
+		Year:   b.Year,
+		Notes:  notes,
+		Kind:   model.BudgetExpense,
+		Amount: b.Amount,
 	}
-	resp.Category.ID = b.Category.ID
-	resp.Category.Name = b.Category.Name
 	resp.PeriodStart, resp.PeriodEnd = periodLabels(startDay, b.Year, b.Month)
 
+	if b.Kind == model.BudgetSavings && b.WalletID != nil {
+		deposited, err := lookup.deposited(b.Year, b.Month, *b.WalletID)
+		if err != nil {
+			return nil, err
+		}
+		resp.Kind = model.BudgetSavings
+		resp.Spent = deposited
+		resp.Remain = math.Max(b.Amount-deposited, 0)
+		resp.UsedPct = percentOf(deposited, b.Amount)
+		resp.Status = "in_progress"
+		if deposited >= b.Amount {
+			resp.Status = "achieved"
+		}
+		ref, err := lookup.wallet(*b.WalletID)
+		if err != nil {
+			return nil, err
+		}
+		resp.Wallet = ref
+		if b.GoalID != nil {
+			if resp.Goal, err = lookup.goal(*b.GoalID); err != nil {
+				return nil, err
+			}
+		}
+		return resp, nil
+	}
+
+	start, end := budgetcycle.Period(startDay, b.Year, b.Month)
+	spent, err := s.budgetRepo.GetSpentByCategory(userID, *b.CategoryID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	resp.Spent = spent
+	resp.Remain = b.Amount - spent
+	resp.UsedPct = percentOf(spent, b.Amount)
+	resp.Status = budgetStatus(spent, b.Amount)
+	resp.Category.ID = b.Category.ID
+	resp.Category.Name = b.Category.Name
 	return resp, nil
 }
 
-func budgetStatus(pct float64) string {
+func percentOf(part, whole float64) float64 {
+	if whole <= 0 {
+		return 0
+	}
+	return math.Round((part/whole)*10000) / 100
+}
+
+func budgetStatus(spent, amount float64) string {
 	switch {
-	case pct >= 100:
+	case spent > amount:
 		return "over_budget"
-	case pct >= 80:
+	case spent == amount:
+		return "used_up"
+	case percentOf(spent, amount) >= 80:
 		return "warning"
 	default:
 		return "on_track"

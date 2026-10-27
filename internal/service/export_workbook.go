@@ -861,7 +861,7 @@ func renderBudgets(sh *sheet, d *reportData) {
 		basis = "Periode anggaran mengikuti bulan kalender."
 	}
 	sh.heading("Anggaran", basis+" Pemakaian dihitung untuk seluruh periode anggaran.")
-	statusLabel := map[string]string{"on_track": "Aman", "warning": "Hampir habis", "over_budget": "Terlampaui"}
+	statusLabel := map[string]string{"on_track": "Aman", "warning": "Hampir habis", "used_up": "Habis", "over_budget": "Terlampaui", "in_progress": "Berjalan", "achieved": "Tercapai"}
 	var rows [][]any
 	var statuses []string
 	for _, summary := range d.Budgets {
@@ -869,8 +869,12 @@ func renderBudgets(sh *sheet, d *reportData) {
 		end, _ := time.Parse("2006-01-02", summary.PeriodEnd)
 		label := fmt.Sprintf("%s %d", idMonths[summary.Month-1], summary.Year)
 		for _, b := range summary.Budgets {
+			kind, name := "Pengeluaran", b.Category.Name
+			if b.Kind == "savings" {
+				kind, name = "Tabungan", budgetName(&b)
+			}
 			rows = append(rows, []any{
-				label, excelDate(start), excelDate(end), b.Category.Name, round2(b.Amount), round2(b.Spent),
+				label, excelDate(start), excelDate(end), kind, name, round2(b.Amount), round2(b.Spent),
 				round2(b.Remain), b.UsedPct / 100, statusLabel[b.Status], b.Notes,
 			})
 			statuses = append(statuses, b.Status)
@@ -878,24 +882,24 @@ func renderBudgets(sh *sheet, d *reportData) {
 	}
 	st := sh.st
 	first, _ := sh.table("Anggaran", []column{
-		{"Periode", 16, st.text, ""}, {"Mulai", 13, st.date, ""}, {"Sampai", 13, st.date, ""}, {"Kategori", 22, st.text, ""},
-		{"Anggaran", 16, st.money, "sum"}, {"Terpakai", 16, st.money, "sum"}, {"Sisa", 16, st.money, "sum"},
+		{"Periode", 16, st.text, ""}, {"Mulai", 13, st.date, ""}, {"Sampai", 13, st.date, ""}, {"Jenis", 13, st.text, ""}, {"Kategori / tujuan", 24, st.text, ""},
+		{"Anggaran / rencana", 18, st.money, "sum"}, {"Terpakai / disetor", 18, st.money, "sum"}, {"Sisa", 16, st.money, "sum"},
 		{"Pemakaian", 12, st.pct, ""}, {"Status", 14, st.text, ""}, {"Catatan", 28, st.wrap, ""},
 	}, rows, true)
 	for i, s := range statuses {
 		style := st.good
 		switch s {
-		case "warning":
+		case "warning", "used_up":
 			style = st.warn
 		case "over_budget":
 			style = st.bad
 		}
 		if sh.err == nil {
-			sh.err = sh.f.SetCellStyle(sh.name, cell(9, first+i), cell(9, first+i), style)
+			sh.err = sh.f.SetCellStyle(sh.name, cell(10, first+i), cell(10, first+i), style)
 		}
 	}
 	if len(rows) > 0 && sh.err == nil {
-		sh.err = sh.f.SetConditionalFormat(sh.name, fmt.Sprintf("H%d:H%d", first, first+len(rows)-1), []excelize.ConditionalFormatOptions{{
+		sh.err = sh.f.SetConditionalFormat(sh.name, fmt.Sprintf("I%d:I%d", first, first+len(rows)-1), []excelize.ConditionalFormatOptions{{
 			Type: "data_bar", Criteria: "=", MinType: "num", MinValue: "0", MaxType: "num", MaxValue: "1", BarColor: "#B9A6F5", BarSolid: true,
 		}})
 	}

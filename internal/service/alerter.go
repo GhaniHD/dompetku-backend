@@ -5,6 +5,7 @@ import (
 	"dompetku/internal/repository"
 	"dompetku/pkg/budgetcycle"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,6 +72,11 @@ func (a *Alerter) BalanceChanges(userID uuid.UUID, changes []balanceChange) {
 						fmt.Sprintf("Target \"%s\" sebesar Rp %.0f sudah tercapai di dompet \"%s\".", g.Name, g.TargetAmount, c.Wallet.Name),
 					)
 				}
+			}
+		}
+		if c.After < c.Before {
+			if err := a.goalRepo.ResetAchieved(c.Wallet.ID, c.After); err != nil {
+				log.Printf("[alerter] gagal memperbarui status target: %v", err)
 			}
 		}
 		if c.Wallet.AllowsNegative() {
