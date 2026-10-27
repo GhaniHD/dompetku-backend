@@ -11,6 +11,7 @@ import (
 	"dompetku/internal/service"
 	"dompetku/pkg/config"
 	"dompetku/pkg/db"
+	"dompetku/pkg/ratelimit"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -30,6 +31,8 @@ var (
 	fakeClaude   *fakeClaudeServer
 	recurringSvc service.RecurringService
 	debtSvc      service.DebtService
+	limiter      *ratelimit.Limiter
+	router       *gin.Engine
 )
 
 func TestMain(m *testing.M) {
@@ -82,7 +85,6 @@ func run(m *testing.M) (int, error) {
 	}
 	gin.SetMode(gin.TestMode)
 
-	var router *gin.Engine
 	app := fx.New(
 		fx.NopLogger,
 		config.Module,
@@ -90,7 +92,7 @@ func run(m *testing.M) (int, error) {
 		repository.Module,
 		service.Module,
 		api.Module,
-		fx.Populate(&router, &gdb, &recurringSvc, &debtSvc),
+		fx.Populate(&router, &gdb, &recurringSvc, &debtSvc, &limiter),
 	)
 	if err := app.Err(); err != nil {
 		return 0, err
@@ -100,6 +102,7 @@ func run(m *testing.M) (int, error) {
 		return 0, err
 	}
 
+	limiter.SetEnabled(false)
 	server = httptest.NewServer(router)
 	defer server.Close()
 

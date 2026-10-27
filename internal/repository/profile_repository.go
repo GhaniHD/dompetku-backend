@@ -64,7 +64,7 @@ func (r *profileRepository) UpdatePassword(ctx context.Context, id uuid.UUID, ha
 	return r.db.WithContext(ctx).
 		Model(&model.User{}).
 		Where("id = ?", id).
-		Updates(map[string]any{"password": hashedPassword, "token_version": gorm.Expr("token_version + 1")}).Error
+		Updates(map[string]any{"password": hashedPassword, "token_version": gorm.Expr("token_version + 1"), "session_reason": model.SessionPassword}).Error
 }
 
 func (r *profileRepository) UpdateAvatar(ctx context.Context, id uuid.UUID, avatarURL string) (*model.User, error) {

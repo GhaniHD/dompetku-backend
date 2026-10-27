@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS session_reason varchar(20) NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_device varchar(120) NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_ip varchar(64) NOT NULL DEFAULT '';
+
+COMMIT;

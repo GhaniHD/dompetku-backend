@@ -26,6 +26,9 @@ type AppConf struct {
 	ClaudeAPIURL string
 	AdminEmails  []string
 	CORSOrigins  []string
+	// TrustedProxies: proxy yang header X-Forwarded-For-nya dipercaya untuk
+	// menentukan IP asli (Caddy di VPS, load balancer Render).
+	TrustedProxies []string
 }
 
 const minJWTSecretLength = 32
@@ -36,19 +39,20 @@ func NewAppConf() (*AppConf, error) {
 	}
 
 	cfg := &AppConf{
-		DBHost:       getEnv("DB_HOST", "db"),
-		DBPort:       getEnv("DB_PORT", "5432"),
-		DBUser:       getEnv("DB_USER", "postgres"),
-		DBPass:       getEnv("DB_PASSWORD", "postgres"),
-		DBName:       getEnv("DB_NAME", "dompetku"),
-		DBSSLMode:    getEnv("DB_SSLMODE", "disable"),
-		JWTSecret:    os.Getenv("JWT_SECRET"),
-		ServerPort:   getEnv("PORT", getEnv("SERVER_PORT", "8090")),
-		ClaudeAPIKey: os.Getenv("CLAUDE_API_KEY"),
-		ClaudeModel:  getEnv("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
-		ClaudeAPIURL: getEnv("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
-		AdminEmails:  splitList(os.Getenv("ADMIN_EMAILS"), true),
-		CORSOrigins:  splitList(getEnv("CORS_ORIGINS", "http://localhost:5173,https://dompetku-new.vercel.app"), false),
+		DBHost:         getEnv("DB_HOST", "db"),
+		DBPort:         getEnv("DB_PORT", "5432"),
+		DBUser:         getEnv("DB_USER", "postgres"),
+		DBPass:         getEnv("DB_PASSWORD", "postgres"),
+		DBName:         getEnv("DB_NAME", "dompetku"),
+		DBSSLMode:      getEnv("DB_SSLMODE", "disable"),
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+		ServerPort:     getEnv("PORT", getEnv("SERVER_PORT", "8090")),
+		ClaudeAPIKey:   os.Getenv("CLAUDE_API_KEY"),
+		ClaudeModel:    getEnv("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+		ClaudeAPIURL:   getEnv("CLAUDE_API_URL", "https://api.anthropic.com/v1/messages"),
+		AdminEmails:    splitList(os.Getenv("ADMIN_EMAILS"), true),
+		CORSOrigins:    splitList(getEnv("CORS_ORIGINS", "http://localhost:5173,https://dompetku-new.vercel.app"), false),
+		TrustedProxies: splitList(getEnv("TRUSTED_PROXIES", "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"), false),
 	}
 
 	if len(cfg.JWTSecret) < minJWTSecretLength {

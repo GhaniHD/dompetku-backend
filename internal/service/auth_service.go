@@ -25,16 +25,17 @@ import (
 const minPasswordLength = 8
 
 var (
-	ErrAccountPending    = errors.New("akun kamu menunggu persetujuan admin")
-	ErrAccountRejected   = errors.New("pendaftaran akun ini ditolak admin")
-	ErrAccountSuspended  = errors.New("akun ini dinonaktifkan admin")
-	ErrInviteInvalid     = errors.New("kode undangan tidak valid, sudah dipakai, atau sudah kedaluwarsa")
-	ErrResetTokenInvalid = errors.New("link atur ulang password tidak valid atau sudah kedaluwarsa")
+	ErrAccountPending     = errors.New("akun kamu menunggu persetujuan admin")
+	ErrAccountRejected    = errors.New("pendaftaran akun ini ditolak admin")
+	ErrAccountSuspended   = errors.New("akun ini dinonaktifkan admin")
+	ErrInviteInvalid      = errors.New("kode undangan tidak valid, sudah dipakai, atau sudah kedaluwarsa")
+	ErrResetTokenInvalid  = errors.New("link atur ulang password tidak valid atau sudah kedaluwarsa")
+	ErrInvalidCredentials = errors.New("email atau password salah")
 )
 
 type AuthService interface {
-	Register(ctx context.Context, req dto.RegisterRequest) (*dto.RegisterResponse, error)
-	Login(ctx context.Context, req dto.LoginRequest) (*dto.AuthResponse, error)
+	Register(ctx context.Context, req dto.RegisterRequest, client dto.ClientInfo) (*dto.RegisterResponse, error)
+	Login(ctx context.Context, req dto.LoginRequest, client dto.ClientInfo) (*dto.AuthResponse, error)
 	CheckInvite(code string) (*dto.InviteCheckResponse, error)
 	ResetPassword(req dto.ResetPasswordRequest) error
 }
@@ -78,7 +79,7 @@ func StatusError(status string) error {
 	return nil
 }
 
-func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*dto.RegisterResponse, error) {
+func (s *authService) Register(ctx context.Context, req dto.RegisterRequest, client dto.ClientInfo) (*dto.RegisterResponse, error) {
 	name := strings.TrimSpace(req.Name)
 	email := normalizeEmail(req.Email)
 
@@ -138,8 +139,7 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) (*d
 		s.notifyAdmins(user)
 		return resp, nil
 	}
-	s.touchLogin(user)
-	token, err := utils.GenerateToken(user.ID, user.Email, s.cfg.JWTSecret, user.TokenVersion)
+	token, err := s.startSession(ctx, user, client)
 	if err != nil {
 		return nil, err
 	}
@@ -161,13 +161,23 @@ func (s *authService) notifyAdmins(user *model.User) {
 	}
 }
 
-func (s *authService) touchLogin(user *model.User) {
-	if err := s.db.Model(&model.User{}).Where("id = ?", user.ID).UpdateColumn("last_login_at", time.Now()).Error; err != nil {
-		log.Printf("[auth] gagal mencatat login: %v", err)
+// startSession menaikkan versi token sehingga sesi di perangkat lain otomatis
+// berakhir: satu akun hanya aktif di satu perangkat.
+func (s *authService) startSession(ctx context.Context, user *model.User, client dto.ClientInfo) (string, error) {
+	var version int
+	err := s.db.WithContext(ctx).Raw(`UPDATE users
+		SET token_version = token_version + 1, session_reason = ?, last_login_at = ?, last_login_device = ?, last_login_ip = ?
+		WHERE id = ? RETURNING token_version`,
+		model.SessionLogin, time.Now(), truncate(utils.DescribeDevice(client.UserAgent), 120), truncate(client.IP, 64), user.ID).
+		Scan(&version).Error
+	if err != nil {
+		return "", err
 	}
+	user.TokenVersion = version
+	return utils.GenerateToken(user.ID, user.Email, s.cfg.JWTSecret, version)
 }
 
-func (s *authService) Login(ctx context.Context, req dto.LoginRequest) (*dto.AuthResponse, error) {
+func (s *authService) Login(ctx context.Context, req dto.LoginRequest, client dto.ClientInfo) (*dto.AuthResponse, error) {
 	email := normalizeEmail(req.Email)
 	if email == "" || req.Password == "" {
 		return nil, errors.New("email dan password wajib diisi")
@@ -175,20 +185,19 @@ func (s *authService) Login(ctx context.Context, req dto.LoginRequest) (*dto.Aut
 
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil || user == nil {
-		return nil, errors.New("email atau password salah")
+		return nil, ErrInvalidCredentials
 	}
 	if !crypto.CheckPasswordHash(req.Password, user.Password) {
-		return nil, errors.New("email atau password salah")
+		return nil, ErrInvalidCredentials
 	}
 	if err := StatusError(user.Status); err != nil {
 		return nil, err
 	}
 
-	token, err := utils.GenerateToken(user.ID, user.Email, s.cfg.JWTSecret, user.TokenVersion)
+	token, err := s.startSession(ctx, user, client)
 	if err != nil {
 		return nil, err
 	}
-	s.touchLogin(user)
 	return &dto.AuthResponse{Token: token, User: userResponse(user)}, nil
 }
 
@@ -244,8 +253,9 @@ func (s *authService) ResetPassword(req dto.ResetPasswordRequest) error {
 			return err
 		}
 		res := tx.Model(&model.User{}).Where("id = ?", t.UserID).Updates(map[string]any{
-			"password":      hashed,
-			"token_version": gorm.Expr("token_version + 1"),
+			"password":       hashed,
+			"token_version":  gorm.Expr("token_version + 1"),
+			"session_reason": model.SessionPassword,
 		})
 		if res.Error != nil {
 			return res.Error

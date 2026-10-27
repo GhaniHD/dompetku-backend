@@ -47,3 +47,9 @@ type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 }
+
+// ClientInfo berisi data perangkat yang dicatat saat login.
+type ClientInfo struct {
+	UserAgent string
+	IP        string
+}
