@@ -12,6 +12,11 @@ type RegisterResponse struct {
 	Status string       `json:"status"`
 	Token  string       `json:"token,omitempty"`
 	User   UserResponse `json:"user"`
+	// VerificationRequired: akun aktif tetapi email harus diverifikasi dengan kode dulu.
+	VerificationRequired bool   `json:"verification_required,omitempty"`
+	VerifyToken          string `json:"verify_token,omitempty"`
+	Email                string `json:"email,omitempty"`
+	ResendIn             int    `json:"resend_in,omitempty"`
 }
 
 type ResetPasswordRequest struct {

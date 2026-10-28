@@ -37,6 +37,7 @@ var (
 	ErrDailyCategory     = errors.New("kategori jatah harian harus kategori pengeluaran milikmu")
 	ErrDeletePassword    = errors.New("password salah, akun tidak dihapus")
 	ErrAdminCannotDelete = errors.New("akun admin tidak bisa dihapus dari profil")
+	ErrUseEmailChange    = errors.New("ganti email lewat tombol Ganti email di Profil")
 )
 
 type ProfileService interface {
@@ -53,15 +54,18 @@ type ProfileService interface {
 type profileService struct {
 	profileRepo repository.ProfileRepository
 	userRepo    repository.UserRepository
+	mailer      Mailer
 }
 
 func NewProfileService(
 	profileRepo repository.ProfileRepository,
 	userRepo repository.UserRepository,
+	mailer Mailer,
 ) ProfileService {
 	return &profileService{
 		profileRepo: profileRepo,
 		userRepo:    userRepo,
+		mailer:      mailer,
 	}
 }
 
@@ -99,6 +103,7 @@ func (s *profileService) buildResponse(ctx context.Context, user *model.User) (*
 		TotalBalance:     balance,
 		TotalTx:          txCount,
 		TotalWallet:      walletCount,
+		EmailStatus:      emailStatus(user, s.mailer.Enabled()),
 	}, nil
 }
 
@@ -116,17 +121,16 @@ func (s *profileService) GetProfile(ctx context.Context, userID uuid.UUID) (*dto
 
 func (s *profileService) UpdateProfile(ctx context.Context, userID uuid.UUID, req *dto.UpdateProfileRequest) (*dto.ProfileResponse, error) {
 	req.Name = strings.TrimSpace(req.Name)
-	req.Email = normalizeEmail(req.Email)
-
-	exists, err := s.profileRepo.EmailExistsExcept(ctx, req.Email, userID)
-	if err != nil {
-		return nil, err
+	current, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil || current == nil {
+		return nil, ErrUserNotFound
 	}
-	if exists {
-		return nil, ErrEmailAlreadyUsed
+	// Email hanya bisa diganti lewat alur verifikasi (password + kode).
+	if req.Email != "" && normalizeEmail(req.Email) != strings.ToLower(current.Email) {
+		return nil, ErrUseEmailChange
 	}
 
-	user, err := s.profileRepo.UpdateProfile(ctx, userID, req.Name, req.Email)
+	user, err := s.profileRepo.UpdateProfile(ctx, userID, req.Name, current.Email)
 	if err != nil {
 		return nil, err
 	}

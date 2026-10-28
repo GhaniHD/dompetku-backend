@@ -29,6 +29,25 @@ type AppConf struct {
 	// TrustedProxies: proxy yang header X-Forwarded-For-nya dipercaya untuk
 	// menentukan IP asli (Caddy di VPS, load balancer Render).
 	TrustedProxies []string
+
+	// Email lewat SMTP (Brevo atau penyedia lain). Kosongkan SMTP_HOST untuk
+	// mematikan semua email; verifikasi email ikut nonaktif.
+	SMTPHost    string
+	SMTPPort    string
+	SMTPUser    string
+	SMTPPass    string
+	MailFrom    string
+	MailReplyTo string
+	// AppURL: alamat frontend untuk link di email.
+	AppURL string
+	// APIURL: alamat publik backend, dipakai untuk tombol berhenti langganan satu klik.
+	APIURL string
+	// BrevoWebhookSecret: dicocokkan dengan ?secret= pada webhook Brevo.
+	BrevoWebhookSecret string
+	// AdminWhatsApp: nomor WA admin (format 62...) untuk tombol kabari admin setelah daftar.
+	AdminWhatsApp string
+	// EmailDomainCheck: cek MX record domain email saat daftar.
+	EmailDomainCheck bool
 }
 
 const minJWTSecretLength = 32
@@ -53,6 +72,18 @@ func NewAppConf() (*AppConf, error) {
 		AdminEmails:    splitList(os.Getenv("ADMIN_EMAILS"), true),
 		CORSOrigins:    splitList(getEnv("CORS_ORIGINS", "http://localhost:5173,https://myfulus.my.id,https://www.myfulus.my.id,https://dompetku-new.vercel.app"), false),
 		TrustedProxies: splitList(getEnv("TRUSTED_PROXIES", "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"), false),
+
+		SMTPHost:           os.Getenv("SMTP_HOST"),
+		SMTPPort:           getEnv("SMTP_PORT", "587"),
+		SMTPUser:           os.Getenv("SMTP_USER"),
+		SMTPPass:           os.Getenv("SMTP_PASS"),
+		MailFrom:           getEnv("MAIL_FROM", "MyFulus <noreply@myfulus.my.id>"),
+		MailReplyTo:        os.Getenv("MAIL_REPLY_TO"),
+		AppURL:             strings.TrimRight(getEnv("APP_URL", "https://myfulus.my.id"), "/"),
+		APIURL:             strings.TrimRight(os.Getenv("API_URL"), "/"),
+		AdminWhatsApp:      normalizePhone(os.Getenv("ADMIN_WHATSAPP")),
+		BrevoWebhookSecret: os.Getenv("BREVO_WEBHOOK_SECRET"),
+		EmailDomainCheck:   getEnv("EMAIL_DOMAIN_CHECK", "true") != "false",
 	}
 
 	if len(cfg.JWTSecret) < minJWTSecretLength {
@@ -60,6 +91,24 @@ func NewAppConf() (*AppConf, error) {
 	}
 
 	return cfg, nil
+}
+
+// normalizePhone menyisakan digit dan mengubah awalan 0 menjadi 62.
+func normalizePhone(raw string) string {
+	var b strings.Builder
+	for _, r := range raw {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	n := b.String()
+	if strings.HasPrefix(n, "0") {
+		n = "62" + n[1:]
+	}
+	if len(n) < 9 {
+		return ""
+	}
+	return n
 }
 
 func getEnv(key, defaultValue string) string {

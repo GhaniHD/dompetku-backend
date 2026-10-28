@@ -55,7 +55,7 @@ type AdminSummaryResponse struct {
 }
 
 type AuthEventFilter struct {
-	Event  string `form:"event"   binding:"omitempty,oneof=login login_failed login_locked logout password_changed password_reset forced_logout"`
+	Event  string `form:"event"   binding:"omitempty,oneof=login login_failed login_locked logout password_changed password_reset forced_logout email_verified email_changed"`
 	UserID string `form:"user_id" binding:"omitempty,uuid"`
 	Query  string `form:"q"`
 	Limit  int    `form:"limit"   binding:"omitempty,min=1,max=300"`
@@ -108,6 +108,9 @@ type AdminUserResponse struct {
 	LastSeenAt      *time.Time `json:"last_seen_at"`
 	Online          bool       `json:"online"`
 	LastLoginDevice string     `json:"last_login_device"`
+	EmailVerified   bool       `json:"email_verified"`
+	EmailBounced    bool       `json:"email_bounced"`
+	EmailPending    bool       `json:"email_pending"`
 	InviteCode      *string    `json:"invite_code"`
 	Wallets         int64      `json:"wallets"`
 	Transactions    int64      `json:"transactions"`

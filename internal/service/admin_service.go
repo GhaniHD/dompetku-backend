@@ -57,11 +57,12 @@ type adminService struct {
 	db       *gorm.DB
 	notif    NotificationService
 	activity Activity
+	emails   EmailService
 	now      func() time.Time
 }
 
-func NewAdminService(db *gorm.DB, notif NotificationService, activity Activity) AdminService {
-	return &adminService{db: db, notif: notif, activity: activity, now: time.Now}
+func NewAdminService(db *gorm.DB, notif NotificationService, activity Activity, emails EmailService) AdminService {
+	return &adminService{db: db, notif: notif, activity: activity, emails: emails, now: time.Now}
 }
 
 func (s *adminService) Summary() (*dto.AdminSummaryResponse, error) {
@@ -130,6 +131,7 @@ func (s *adminService) userQuery() *gorm.DB {
 	return s.db.Table("users u").
 		Select(`u.id, u.name, u.email, u.role, u.status, u.status_reason, u.created_at, u.approved_at, u.last_login_at,
 			u.last_seen_at, u.last_seen_at >= ? AS online, u.last_login_device,
+			u.email_verified_at IS NOT NULL AS email_verified, u.email_bounced_at IS NOT NULL AS email_bounced, u.pending_email <> '' AS email_pending,
 			i.code AS invite_code,
 			(SELECT COUNT(*) FROM wallets w WHERE w.user_id = u.id AND w.deleted_at IS NULL) AS wallets,
 			(SELECT COUNT(*) FROM transactions t WHERE t.user_id = u.id AND t.deleted_at IS NULL) AS transactions`, s.now().Add(-OnlineWindow)).
@@ -304,11 +306,16 @@ func (s *adminService) transition(adminID, userID uuid.UUID, action string, from
 }
 
 func (s *adminService) Approve(adminID, userID uuid.UUID) error {
-	user, err := s.transition(adminID, userID, "approve", []string{model.UserPending, model.UserRejected}, func(*model.User) map[string]any {
-		return map[string]any{"status": model.UserActive, "status_reason": "", "approved_at": s.now(), "approved_by": adminID}
+	user, err := s.transition(adminID, userID, "approve", []string{model.UserPending, model.UserRejected}, func(u *model.User) map[string]any {
+		updates := map[string]any{"status": model.UserActive, "status_reason": "", "approved_at": s.now(), "approved_by": adminID}
+		if s.emails.RequiresVerification(u) {
+			updates["email_verify_due_at"] = s.now()
+		}
+		return updates
 	}, "")
 	if err == nil {
 		_ = s.notif.CreateSystem(user.ID, "Akun disetujui", "Selamat datang di MyFulus! Mulai dengan menambahkan dompet pertamamu.")
+		s.emails.SendApproved(user.ID)
 	}
 	return err
 }

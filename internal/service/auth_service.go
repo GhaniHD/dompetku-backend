@@ -41,6 +41,10 @@ type AuthService interface {
 	ResetPassword(req dto.ResetPasswordRequest, client dto.ClientInfo) error
 	Logout(ctx context.Context, userID uuid.UUID, client dto.ClientInfo) error
 	RecordLoginLocked(email string, client dto.ClientInfo)
+	VerifyLogin(ctx context.Context, req dto.VerifyLoginRequest, client dto.ClientInfo) (*dto.AuthResponse, error)
+	SendLoginCode(token string) (*dto.CodeSentResponse, error)
+	ForgotPassword(email string) error
+	Features() dto.FeaturesResponse
 }
 
 type authService struct {
@@ -49,10 +53,11 @@ type authService struct {
 	notif    NotificationService
 	cfg      *config.AppConf
 	activity Activity
+	emails   EmailService
 }
 
-func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, notif NotificationService, cfg *config.AppConf, activity Activity) AuthService {
-	return &authService{db: db, userRepo: userRepo, notif: notif, cfg: cfg, activity: activity}
+func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, notif NotificationService, cfg *config.AppConf, activity Activity, emails EmailService) AuthService {
+	return &authService{db: db, userRepo: userRepo, notif: notif, cfg: cfg, activity: activity, emails: emails}
 }
 
 func normalizeEmail(email string) string {
@@ -93,6 +98,11 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest, cli
 	if _, err := mail.ParseAddress(email); err != nil {
 		return nil, errors.New("format email tidak valid")
 	}
+	if !s.cfg.IsAdminEmail(email) {
+		if err := CheckEmailAddress(ctx, email, s.cfg.EmailDomainCheck); err != nil {
+			return nil, err
+		}
+	}
 	if err := validatePassword(req.Password); err != nil {
 		return nil, err
 	}
@@ -117,7 +127,7 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest, cli
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		switch {
 		case s.cfg.IsAdminEmail(email):
-			user.Role, user.Status, user.ApprovedAt = model.RoleAdmin, model.UserActive, &now
+			user.Role, user.Status, user.ApprovedAt, user.EmailVerifiedAt = model.RoleAdmin, model.UserActive, &now, &now
 		case code != "":
 			var invite model.Invite
 			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("code = ?", code).First(&invite).Error
@@ -131,6 +141,9 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest, cli
 				return err
 			}
 			user.Status, user.ApprovedAt, user.ApprovedBy, user.InviteID = model.UserActive, &now, &invite.CreatedBy, &invite.ID
+			if s.emails.RequiresVerification(user) {
+				user.EmailVerifyDueAt = &now
+			}
 		}
 		return tx.Create(user).Error
 	})
@@ -141,6 +154,11 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest, cli
 	resp := &dto.RegisterResponse{Status: user.Status, User: userResponse(user)}
 	if user.Status != model.UserActive {
 		s.notifyAdmins(user)
+		return resp, nil
+	}
+	if s.emails.RequiresVerification(user) {
+		ch := s.emails.Challenge(user)
+		resp.VerificationRequired, resp.VerifyToken, resp.Email, resp.ResendIn = true, ch.VerifyToken, ch.Email, ch.ResendIn
 		return resp, nil
 	}
 	token, err := s.startSession(ctx, user, client)
@@ -163,6 +181,7 @@ func (s *authService) notifyAdmins(user *model.User) {
 			log.Printf("[auth] gagal notifikasi admin: %v", err)
 		}
 	}
+	s.emails.NotifyNewSignup(user, admins)
 }
 
 // startSession menaikkan versi token sehingga sesi di perangkat lain otomatis
@@ -201,17 +220,65 @@ func (s *authService) Login(ctx context.Context, req dto.LoginRequest, client dt
 		return nil, err
 	}
 
+	if s.emails.RequiresVerification(user) && !s.emails.EnsureDue(user).After(time.Now()) {
+		return nil, s.emails.Challenge(user)
+	}
+	return s.finishLogin(ctx, user, client)
+}
+
+func (s *authService) finishLogin(ctx context.Context, user *model.User, client dto.ClientInfo) (*dto.AuthResponse, error) {
 	detail := ""
 	if user.LastSeenAt != nil && time.Since(*user.LastSeenAt) < OnlineWindow && user.LastLoginDevice != "" {
 		detail = "mengeluarkan sesi di " + user.LastLoginDevice
 	}
+	prevDevice := user.LastLoginDevice
 	token, err := s.startSession(ctx, user, client)
 	if err != nil {
 		return nil, err
 	}
 	s.activity.Forget(user.ID)
-	s.activity.Record(&user.ID, email, model.EventLogin, detail, client)
+	s.activity.Record(&user.ID, user.Email, model.EventLogin, detail, client)
+	s.emails.LoginAlert(user, prevDevice, client)
 	return &dto.AuthResponse{Token: token, User: userResponse(user)}, nil
+}
+
+// VerifyLogin menyelesaikan login yang tertahan verifikasi email: kode benar
+// berarti email terverifikasi dan sesi langsung dibuat.
+func (s *authService) VerifyLogin(ctx context.Context, req dto.VerifyLoginRequest, client dto.ClientInfo) (*dto.AuthResponse, error) {
+	userID, err := s.emails.ChallengeUser(req.VerifyToken)
+	if err != nil {
+		return nil, err
+	}
+	user, err := s.emails.ConfirmCode(userID, model.CodeVerify, req.Code, client)
+	if errors.Is(err, ErrAlreadyVerified) {
+		return nil, ErrChallengeInvalid
+	}
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrChallengeInvalid
+	}
+	if err := StatusError(user.Status); err != nil {
+		return nil, err
+	}
+	return s.finishLogin(ctx, user, client)
+}
+
+func (s *authService) SendLoginCode(token string) (*dto.CodeSentResponse, error) {
+	userID, err := s.emails.ChallengeUser(token)
+	if err != nil {
+		return nil, err
+	}
+	return s.emails.SendCode(userID, model.CodeVerify)
+}
+
+func (s *authService) ForgotPassword(email string) error {
+	return s.emails.ForgotPassword(email)
+}
+
+func (s *authService) Features() dto.FeaturesResponse {
+	return dto.FeaturesResponse{Email: s.emails.Enabled(), AdminWhatsApp: s.cfg.AdminWhatsApp}
 }
 
 func (s *authService) RecordLoginLocked(email string, client dto.ClientInfo) {

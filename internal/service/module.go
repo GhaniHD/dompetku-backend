@@ -21,4 +21,7 @@ var Module = fx.Module("service",
 	fx.Provide(NewAdminService),
 	fx.Provide(NewBackupService),
 	fx.Provide(NewActivity),
+	fx.Provide(NewMailer),
+	fx.Provide(NewOutbox),
+	fx.Provide(NewEmailService),
 )

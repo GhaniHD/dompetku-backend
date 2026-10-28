@@ -57,6 +57,8 @@ func profileErrResponse(c *gin.Context, err error) {
 		errorResponse(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, service.ErrAdminCannotDelete):
 		errorResponse(c, http.StatusForbidden, err.Error())
+	case errors.Is(err, service.ErrUseEmailChange):
+		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrDailyCategory):
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrFileTooLarge):

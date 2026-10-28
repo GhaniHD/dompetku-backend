@@ -12,11 +12,12 @@ import (
 )
 
 type AdminHandler struct {
-	svc service.AdminService
+	svc    service.AdminService
+	emails service.EmailService
 }
 
-func NewAdminHandler(svc service.AdminService) *AdminHandler {
-	return &AdminHandler{svc: svc}
+func NewAdminHandler(svc service.AdminService, emails service.EmailService) *AdminHandler {
+	return &AdminHandler{svc: svc, emails: emails}
 }
 
 func (h *AdminHandler) RegisterRoutes(rg *gin.RouterGroup) {
@@ -40,6 +41,8 @@ func (h *AdminHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/invites", h.CreateInvite)
 	rg.DELETE("/invites/:id", h.RevokeInvite)
 	rg.GET("/logs", h.Logs)
+	rg.POST("/users/:id/verify-email", h.confirmed(func(c *gin.Context, admin, user uuid.UUID) error { return h.emails.MarkVerified(admin, user) }, "email ditandai terverifikasi"))
+	rg.GET("/email-stats", h.EmailStats)
 }
 
 // RegisterPublic: endpoint untuk semua pengguna yang sudah login.
@@ -276,4 +279,13 @@ func (h *AdminHandler) Logs(c *gin.Context) {
 		result = []dto.AdminLogResponse{}
 	}
 	successResponse(c, http.StatusOK, "log admin", result)
+}
+
+func (h *AdminHandler) EmailStats(c *gin.Context) {
+	result, err := h.emails.Stats()
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "statistik email", result)
 }

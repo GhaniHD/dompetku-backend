@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"strings"
 
 	"dompetku/internal/dto"
@@ -62,7 +63,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	message := "registrasi berhasil"
-	if resp.Token == "" {
+	if resp.VerificationRequired {
+		message = "akun dibuat, masukkan kode verifikasi yang dikirim ke emailmu"
+	} else if resp.Token == "" {
 		message = "pendaftaran terkirim, tunggu persetujuan admin"
 	}
 	successResponse(c, http.StatusCreated, message, resp)
@@ -101,8 +104,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		h.limiter.Reset(failKey)
 	}
 	if err != nil {
-		if errors.Is(err, service.ErrAccountPending) || errors.Is(err, service.ErrAccountRejected) || errors.Is(err, service.ErrAccountSuspended) {
-			errorResponse(c, http.StatusForbidden, err.Error())
+		if emailErrorResponse(c, err) {
 			return
 		}
 		errorResponse(c, http.StatusUnauthorized, err.Error())
@@ -170,4 +172,58 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 	successResponse(c, http.StatusOK, "berhasil keluar", nil)
+}
+
+// POST /api/auth/verify — masukkan kode verifikasi email saat login.
+func (h *AuthHandler) VerifyLogin(c *gin.Context) {
+	var req dto.VerifyLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "kode verifikasi wajib diisi")
+		return
+	}
+	resp, err := h.authService.VerifyLogin(c.Request.Context(), req, clientInfo(c))
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// POST /api/auth/verify/send — kirim ulang kode verifikasi saat login.
+func (h *AuthHandler) SendLoginCode(c *gin.Context) {
+	var req struct {
+		VerifyToken string `json:"verify_token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "format request tidak valid")
+		return
+	}
+	resp, err := h.authService.SendLoginCode(req.VerifyToken)
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "kode verifikasi dikirim", resp)
+}
+
+// POST /api/auth/forgot-password — jawaban selalu sama agar email terdaftar tidak bisa ditebak.
+func (h *AuthHandler) ForgotPassword(c *gin.Context) {
+	var req dto.ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "email wajib diisi")
+		return
+	}
+	if err := h.authService.ForgotPassword(req.Email); err != nil {
+		if errors.Is(err, service.ErrMailDisabled) {
+			serviceErrorResponse(c, err)
+			return
+		}
+		log.Printf("[auth] lupa password: %v", err)
+	}
+	successResponse(c, http.StatusOK, "kalau email itu terdaftar, link atur ulang password sudah dikirim", nil)
+}
+
+// GET /api/auth/features
+func (h *AuthHandler) Features(c *gin.Context) {
+	successResponse(c, http.StatusOK, "fitur", h.authService.Features())
 }

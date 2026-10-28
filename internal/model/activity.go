@@ -15,6 +15,8 @@ const (
 	EventPasswordChanged = "password_changed"
 	EventPasswordReset   = "password_reset"
 	EventForcedLogout    = "forced_logout"
+	EventEmailVerified   = "email_verified"
+	EventEmailChanged    = "email_changed"
 )
 
 type AuthEvent struct {

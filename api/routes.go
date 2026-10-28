@@ -43,6 +43,7 @@ func NewRouter(
 	debtGoalHandler *handler.DebtGoalHandler,
 	adminHandler *handler.AdminHandler,
 	backupHandler *handler.BackupHandler,
+	emailHandler *handler.EmailHandler,
 	userRepo repository.UserRepository,
 	activity service.Activity,
 	cfg *config.AppConf,
@@ -73,13 +74,19 @@ func NewRouter(
 		auth.POST("/login", middleware.RateLimitIP(limiter, "login", 30, 15*time.Minute), authHandler.Login)
 		auth.GET("/invite/:code", middleware.RateLimitIP(limiter, "invite", 30, 15*time.Minute), authHandler.CheckInvite)
 		auth.POST("/reset-password", middleware.RateLimitIP(limiter, "reset", 10, 15*time.Minute), authHandler.ResetPassword)
+		auth.POST("/forgot-password", middleware.RateLimitIP(limiter, "forgot", 5, 15*time.Minute), authHandler.ForgotPassword)
+		auth.POST("/verify", middleware.RateLimitIP(limiter, "verify", 30, 15*time.Minute), authHandler.VerifyLogin)
+		auth.POST("/verify/send", middleware.RateLimitIP(limiter, "verify-send", 10, 15*time.Minute), authHandler.SendLoginCode)
+		auth.GET("/features", authHandler.Features)
 	}
+	emailHandler.RegisterPublic(r.Group("/api/email"))
 
 	protected := r.Group("/api")
 	protected.Use(middleware.AuthMiddleware(cfg, userRepo), middleware.TrackPresence(activity), middleware.RateLimitUser(limiter, 1200, time.Minute))
 	{
 		protected.POST("/auth/logout", authHandler.Logout)
 		profileHandler.RegisterRoutes(protected)
+		emailHandler.RegisterProfile(protected)
 		notificationHandler.RegisterRoutes(protected)
 		adminHandler.RegisterPublic(protected)
 		adminHandler.RegisterRoutes(protected.Group("/admin", middleware.RequireAdmin()))

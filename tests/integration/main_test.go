@@ -34,6 +34,9 @@ var (
 	debtSvc      service.DebtService
 	limiter      *ratelimit.Limiter
 	router       *gin.Engine
+	outboxSvc    service.Outbox
+	emailSvc     service.EmailService
+	fakeMail     = &fakeMailer{}
 )
 
 func TestMain(m *testing.M) {
@@ -69,16 +72,21 @@ func run(m *testing.M) (int, error) {
 	defer fakeClaude.Close()
 
 	env := map[string]string{
-		"DB_HOST":        host,
-		"DB_PORT":        envOr("TEST_DB_PORT", "5432"),
-		"DB_USER":        envOr("TEST_DB_USER", "postgres"),
-		"DB_PASSWORD":    os.Getenv("TEST_DB_PASSWORD"),
-		"DB_NAME":        name,
-		"DB_SSLMODE":     envOr("TEST_DB_SSLMODE", "disable"),
-		"JWT_SECRET":     "integration-test-secret-0123456789abcdef",
-		"CLAUDE_API_KEY": "test-key",
-		"CLAUDE_API_URL": fakeClaude.URL,
-		"ADMIN_EMAILS":   "admin@test.dompetku",
+		"DB_HOST":              host,
+		"DB_PORT":              envOr("TEST_DB_PORT", "5432"),
+		"DB_USER":              envOr("TEST_DB_USER", "postgres"),
+		"DB_PASSWORD":          os.Getenv("TEST_DB_PASSWORD"),
+		"DB_NAME":              name,
+		"DB_SSLMODE":           envOr("TEST_DB_SSLMODE", "disable"),
+		"JWT_SECRET":           "integration-test-secret-0123456789abcdef",
+		"CLAUDE_API_KEY":       "test-key",
+		"CLAUDE_API_URL":       fakeClaude.URL,
+		"ADMIN_EMAILS":         "admin@test.dompetku",
+		"APP_URL":              "https://app.test",
+		"API_URL":              "https://api.test",
+		"BREVO_WEBHOOK_SECRET": "hook-secret-123",
+		"EMAIL_DOMAIN_CHECK":   "false",
+		"ADMIN_WHATSAPP":       "0812-3456-7890",
 	}
 
 	for k, v := range env {
@@ -93,7 +101,8 @@ func run(m *testing.M) (int, error) {
 		repository.Module,
 		service.Module,
 		api.Module,
-		fx.Populate(&router, &gdb, &recurringSvc, &debtSvc, &limiter, &activitySvc),
+		fx.Decorate(func(service.Mailer) service.Mailer { return fakeMail }),
+		fx.Populate(&router, &gdb, &recurringSvc, &debtSvc, &limiter, &activitySvc, &outboxSvc, &emailSvc),
 	)
 	if err := app.Err(); err != nil {
 		return 0, err

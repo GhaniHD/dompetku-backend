@@ -33,7 +33,16 @@ type User struct {
 	ApprovedBy   *uuid.UUID `gorm:"type:uuid" json:"-"`
 	LastLoginAt  *time.Time `json:"-"`
 	LastSeenAt   *time.Time `json:"-"`
-	TokenVersion int        `gorm:"not null;default:0" json:"-"`
+
+	EmailVerifiedAt *time.Time `json:"-"`
+	// EmailVerifyDueAt: batas waktu verifikasi. Lewat dari ini, login wajib memasukkan kode.
+	EmailVerifyDueAt *time.Time `json:"-"`
+	PendingEmail     string     `gorm:"type:varchar(100);not null;default:''" json:"-"`
+	EmailBouncedAt   *time.Time `json:"-"`
+	EmailPrefs       EmailPrefs `gorm:"type:jsonb;serializer:json;not null;default:'{}'" json:"-"`
+	WeeklySentOn     *time.Time `gorm:"type:date" json:"-"`
+	ReminderSentOn   *time.Time `gorm:"type:date" json:"-"`
+	TokenVersion     int        `gorm:"not null;default:0" json:"-"`
 	// SessionReason: alasan versi token terakhir dinaikkan (login, password, admin).
 	SessionReason   string         `gorm:"type:varchar(20);not null;default:''" json:"-"`
 	LastLoginDevice string         `gorm:"type:varchar(120);not null;default:''" json:"-"`
@@ -64,4 +73,11 @@ const (
 
 func (User) TableName() string {
 	return "users"
+}
+
+// EmailPrefs: pilihan email per jenis. Nilai kosong berarti aktif (default).
+type EmailPrefs struct {
+	WeeklyOff     bool `json:"weekly_off,omitempty"`
+	LoginAlertOff bool `json:"login_alert_off,omitempty"`
+	RemindersOff  bool `json:"reminders_off,omitempty"`
 }

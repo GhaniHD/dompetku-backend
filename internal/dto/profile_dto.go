@@ -12,7 +12,7 @@ import (
 // UpdateProfileRequest digunakan untuk PUT /api/profile
 type UpdateProfileRequest struct {
 	Name  string `json:"name"  binding:"required,min=2,max=100"`
-	Email string `json:"email" binding:"required,email"`
+	Email string `json:"email" binding:"omitempty,email"`
 }
 
 // ChangePasswordRequest digunakan untuk PUT /api/profile/password
@@ -68,6 +68,8 @@ type ProfileResponse struct {
 	TotalBalance float64 `json:"balance"`
 	TotalTx      int64   `json:"transactions"`
 	TotalWallet  int64   `json:"wallet"`
+
+	EmailStatus EmailStatus `json:"email_status"`
 }
 
 // AvatarResponse adalah respons setelah upload avatar berhasil

@@ -31,5 +31,10 @@ func PurgeUser(tx *gorm.DB, userID uuid.UUID) error {
 	if err := DeleteUserData(tx, userID); err != nil {
 		return err
 	}
+	for _, table := range []string{"email_codes", "email_outbox"} {
+		if err := tx.Exec("DELETE FROM "+table+" WHERE user_id = ?", userID).Error; err != nil {
+			return fmt.Errorf("hapus %s: %w", table, err)
+		}
+	}
 	return tx.Exec("DELETE FROM users WHERE id = ?", userID).Error
 }
