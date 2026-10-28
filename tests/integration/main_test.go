@@ -30,6 +30,7 @@ var (
 	gdb          *gorm.DB
 	fakeClaude   *fakeClaudeServer
 	recurringSvc service.RecurringService
+	activitySvc  service.Activity
 	debtSvc      service.DebtService
 	limiter      *ratelimit.Limiter
 	router       *gin.Engine
@@ -92,7 +93,7 @@ func run(m *testing.M) (int, error) {
 		repository.Module,
 		service.Module,
 		api.Module,
-		fx.Populate(&router, &gdb, &recurringSvc, &debtSvc, &limiter),
+		fx.Populate(&router, &gdb, &recurringSvc, &debtSvc, &limiter, &activitySvc),
 	)
 	if err := app.Err(); err != nil {
 		return 0, err

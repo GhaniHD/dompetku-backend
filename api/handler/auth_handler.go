@@ -88,6 +88,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Kunci per email setelah beberapa kali gagal, terlepas dari IP penebak.
 	failKey := "login-fail:" + strings.ToLower(strings.TrimSpace(req.Email))
 	if blocked, retry := h.limiter.Blocked(failKey, maxLoginFailures, loginLockout); blocked {
+		h.authService.RecordLoginLocked(req.Email, clientInfo(c))
 		middleware.TooManyRequests(c, retry)
 		return
 	}
@@ -128,7 +129,7 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 		errorResponse(c, http.StatusBadRequest, "token dan password baru wajib diisi")
 		return
 	}
-	if err := h.authService.ResetPassword(req); err != nil {
+	if err := h.authService.ResetPassword(req, clientInfo(c)); err != nil {
 		if errors.Is(err, service.ErrResetTokenInvalid) {
 			errorResponse(c, http.StatusBadRequest, err.Error())
 			return
@@ -155,4 +156,18 @@ func isUserFacing(err error) bool {
 		}
 	}
 	return false
+}
+
+// POST /api/auth/logout
+func (h *AuthHandler) Logout(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+	if err := h.authService.Logout(c.Request.Context(), userID, clientInfo(c)); err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "berhasil keluar", nil)
 }

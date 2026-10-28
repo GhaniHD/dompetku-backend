@@ -19,6 +19,7 @@ type apiResponse struct {
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data"`
 	Token   string          `json:"token"`
+	Code    string          `json:"code"`
 }
 
 type idResponse struct {

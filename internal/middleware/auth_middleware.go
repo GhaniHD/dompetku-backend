@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"dompetku/internal/model"
 	"dompetku/internal/repository"
 	"dompetku/pkg/config"
@@ -9,8 +10,10 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 func abortJSON(c *gin.Context, status int, message string) {
@@ -65,6 +68,10 @@ func AuthMiddleware(cfg *config.AppConf, userRepo repository.UserRepository) gin
 			abortJSON(c, http.StatusUnauthorized, statusMessage(user.Status))
 			return
 		}
+		if user.Role == model.RoleAdmin && user.LastSeenAt != nil && time.Since(*user.LastSeenAt) > AdminIdleTimeout {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "code": "admin_idle", "message": "Sesi admin berakhir karena tidak aktif 30 menit. Silakan masuk lagi.", "data": nil})
+			return
+		}
 
 		c.Set("role", user.Role)
 		c.Set("user_id", claims.UserID)
@@ -78,6 +85,8 @@ func sessionEnded(reason string) (string, string) {
 		return "session_replaced", "Kamu keluar karena akun ini masuk di perangkat lain."
 	case model.SessionPassword:
 		return "password_changed", "Password akun ini baru diganti. Silakan masuk lagi."
+	case model.SessionAdmin:
+		return "session_ended", "Sesimu diakhiri oleh admin. Silakan masuk lagi."
 	default:
 		return "session_ended", "Sesi berakhir, silakan masuk lagi."
 	}
@@ -100,6 +109,39 @@ func RequireAdmin() gin.HandlerFunc {
 		if role, _ := c.Get("role"); role != model.RoleAdmin {
 			abortJSON(c, http.StatusForbidden, "hanya admin yang boleh mengakses")
 			return
+		}
+		c.Next()
+	}
+}
+
+// AdminIdleTimeout disamakan dengan service.AdminIdleTimeout; middleware tidak
+// mengimpor service agar tidak terjadi import melingkar.
+const AdminIdleTimeout = 30 * time.Minute
+
+// ForbidAdmin menolak akun admin di endpoint keuangan: akun admin hanya untuk
+// konsol admin dan tidak menyimpan data keuangan.
+func ForbidAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if role, _ := c.Get("role"); role == model.RoleAdmin {
+			abortJSON(c, http.StatusForbidden, "akun admin hanya untuk konsol admin, pakai akun biasa untuk mencatat keuangan")
+			return
+		}
+		c.Next()
+	}
+}
+
+// Presence menyimpan kapan pengguna terakhir aktif.
+type Presence interface {
+	Touch(ctx context.Context, userID uuid.UUID)
+}
+
+// TrackPresence wajib dipasang setelah AuthMiddleware.
+func TrackPresence(p Presence) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if id, ok := c.Get("user_id"); ok {
+			if userID, ok := id.(uuid.UUID); ok {
+				p.Touch(c.Request.Context(), userID)
+			}
 		}
 		c.Next()
 	}

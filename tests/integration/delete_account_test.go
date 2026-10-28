@@ -77,7 +77,7 @@ func TestAdminDeleteIsPermanent(t *testing.T) {
 	seedFinance(t, u)
 	admin := adminUser(t)
 
-	adminCall(t, admin, http.MethodDelete, "/users/"+u.ID, nil, http.StatusOK)
+	adminCall(t, admin, http.MethodDelete, "/users/"+u.ID, adminPassword, http.StatusOK)
 	expectNoTrace(t, u.ID)
 
 	logs := decode[[]struct {

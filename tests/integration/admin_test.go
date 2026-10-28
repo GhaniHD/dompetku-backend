@@ -11,6 +11,8 @@ import (
 
 const testAdminEmail = "admin@test.dompetku"
 
+var adminPassword = map[string]any{"password": "rahasia123"}
+
 // adminUser memakai email yang terdaftar di ADMIN_EMAILS (lihat main_test.go).
 func adminUser(t *testing.T) testUser {
 	t.Helper()
@@ -159,7 +161,7 @@ func TestResetLinkChangesPasswordOnce(t *testing.T) {
 
 	link := decode[struct {
 		Token string `json:"token"`
-	}](t, adminCall(t, admin, http.MethodPost, "/users/"+u.ID+"/reset-link", nil, http.StatusCreated))
+	}](t, adminCall(t, admin, http.MethodPost, "/users/"+u.ID+"/reset-link", adminPassword, http.StatusCreated))
 
 	status, r := call(t, http.MethodPost, "/api/auth/reset-password", "", map[string]any{"token": link.Token, "password": "pendek"})
 	expectStatus(t, status, http.StatusBadRequest, r)
@@ -190,9 +192,9 @@ func TestAdminEndpointsAreProtected(t *testing.T) {
 		ID string `json:"id"`
 	}](t, func() apiResponse { _, r := call(t, http.MethodGet, "/api/profile", admin.Token, nil); return r }()).ID
 	adminCall(t, admin, http.MethodPost, "/users/"+adminID+"/suspend", nil, http.StatusForbidden)
-	adminCall(t, admin, http.MethodDelete, "/users/"+adminID, nil, http.StatusForbidden)
+	adminCall(t, admin, http.MethodDelete, "/users/"+adminID, adminPassword, http.StatusForbidden)
 
-	adminCall(t, admin, http.MethodDelete, "/users/"+u.ID, nil, http.StatusOK)
+	adminCall(t, admin, http.MethodDelete, "/users/"+u.ID, adminPassword, http.StatusOK)
 	status, r = call(t, http.MethodGet, "/api/wallets", u.Token, nil)
 	expectStatus(t, status, http.StatusUnauthorized, r)
 

@@ -4,6 +4,7 @@ import (
 	"dompetku/api/handler"
 	"dompetku/internal/middleware"
 	"dompetku/internal/repository"
+	"dompetku/internal/service"
 	claudepkg "dompetku/pkg/claude"
 	"dompetku/pkg/config"
 	"dompetku/pkg/ratelimit"
@@ -43,6 +44,7 @@ func NewRouter(
 	adminHandler *handler.AdminHandler,
 	backupHandler *handler.BackupHandler,
 	userRepo repository.UserRepository,
+	activity service.Activity,
 	cfg *config.AppConf,
 	limiter *ratelimit.Limiter,
 ) *gin.Engine {
@@ -74,23 +76,28 @@ func NewRouter(
 	}
 
 	protected := r.Group("/api")
-	protected.Use(middleware.AuthMiddleware(cfg, userRepo), middleware.RateLimitUser(limiter, 1200, time.Minute))
+	protected.Use(middleware.AuthMiddleware(cfg, userRepo), middleware.TrackPresence(activity), middleware.RateLimitUser(limiter, 1200, time.Minute))
 	{
+		protected.POST("/auth/logout", authHandler.Logout)
 		profileHandler.RegisterRoutes(protected)
-		transactionHandler.RegisterRoutes(protected)
-		categoryHandler.RegisterRoutes(protected)
-		budgetHandler.RegisterRoutes(protected)
-		walletHandler.RegisterRoutes(protected)
 		notificationHandler.RegisterRoutes(protected)
-		reportHandler.RegisterRoutes(protected)
-		analysisHandler.RegisterRoutes(protected)
-		transferHandler.RegisterRoutes(protected)
-		exportHandler.RegisterRoutes(protected)
-		recurringHandler.RegisterRoutes(protected)
-		debtGoalHandler.RegisterRoutes(protected)
+		adminHandler.RegisterPublic(protected)
 		adminHandler.RegisterRoutes(protected.Group("/admin", middleware.RequireAdmin()))
 
-		backup := protected.Group("/backup")
+		// Fitur keuangan: akun admin ditolak di semua endpoint ini.
+		finance := protected.Group("", middleware.ForbidAdmin())
+		transactionHandler.RegisterRoutes(finance)
+		categoryHandler.RegisterRoutes(finance)
+		budgetHandler.RegisterRoutes(finance)
+		walletHandler.RegisterRoutes(finance)
+		reportHandler.RegisterRoutes(finance)
+		analysisHandler.RegisterRoutes(finance)
+		transferHandler.RegisterRoutes(finance)
+		exportHandler.RegisterRoutes(finance)
+		recurringHandler.RegisterRoutes(finance)
+		debtGoalHandler.RegisterRoutes(finance)
+
+		backup := finance.Group("/backup")
 		backup.POST("/export", middleware.RateLimitUserNamed(limiter, "backup-export", 5, time.Hour), backupHandler.Export)
 		backup.POST("/preview", middleware.RateLimitUserNamed(limiter, "backup-preview", 10, time.Hour), backupHandler.Preview)
 		backup.POST("/restore", middleware.RateLimitUserNamed(limiter, "backup-restore", 5, time.Hour), backupHandler.Restore)

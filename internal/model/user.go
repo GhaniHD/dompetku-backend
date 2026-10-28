@@ -32,6 +32,7 @@ type User struct {
 	ApprovedAt   *time.Time `json:"-"`
 	ApprovedBy   *uuid.UUID `gorm:"type:uuid" json:"-"`
 	LastLoginAt  *time.Time `json:"-"`
+	LastSeenAt   *time.Time `json:"-"`
 	TokenVersion int        `gorm:"not null;default:0" json:"-"`
 	// SessionReason: alasan versi token terakhir dinaikkan (login, password, admin).
 	SessionReason   string         `gorm:"type:varchar(20);not null;default:''" json:"-"`
@@ -47,6 +48,7 @@ const (
 	SessionLogin    = "login"
 	SessionPassword = "password"
 	SessionAdmin    = "admin"
+	SessionLogout   = "logout"
 
 	IncomeSalary    = "salary"
 	IncomeIrregular = "irregular"

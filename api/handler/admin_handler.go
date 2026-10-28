@@ -26,12 +26,129 @@ func (h *AdminHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/users/:id/reject", h.userAction(h.svc.Reject, "pendaftaran ditolak"))
 	rg.POST("/users/:id/suspend", h.userAction(h.svc.Suspend, "akun dinonaktifkan"))
 	rg.POST("/users/:id/activate", h.userAction(func(admin, user uuid.UUID, reason string) error { return h.svc.Activate(admin, user) }, "akun diaktifkan lagi"))
+	rg.GET("/users/:id", h.UserDetail)
 	rg.POST("/users/:id/reset-link", h.ResetLink)
-	rg.DELETE("/users/:id", h.userAction(func(admin, user uuid.UUID, reason string) error { return h.svc.Delete(admin, user) }, "akun dihapus"))
+	rg.POST("/users/:id/logout", h.confirmed(func(c *gin.Context, admin, user uuid.UUID) error {
+		return h.svc.ForceLogout(admin, user, clientInfo(c))
+	}, "pengguna dikeluarkan dari semua perangkat"))
+	rg.DELETE("/users/:id", h.confirmed(func(c *gin.Context, admin, user uuid.UUID) error { return h.svc.Delete(admin, user) }, "akun dihapus"))
+	rg.GET("/activity", h.Activity)
+	rg.GET("/announcements", h.ListAnnouncements)
+	rg.POST("/announcements", h.CreateAnnouncement)
+	rg.POST("/announcements/:id/end", h.EndAnnouncement)
 	rg.GET("/invites", h.ListInvites)
 	rg.POST("/invites", h.CreateInvite)
 	rg.DELETE("/invites/:id", h.RevokeInvite)
 	rg.GET("/logs", h.Logs)
+}
+
+// RegisterPublic: endpoint untuk semua pengguna yang sudah login.
+func (h *AdminHandler) RegisterPublic(rg *gin.RouterGroup) {
+	rg.GET("/announcements", h.ActiveAnnouncements)
+}
+
+// checkPassword meminta admin mengetik ulang password untuk aksi berbahaya.
+func (h *AdminHandler) checkPassword(c *gin.Context, admin uuid.UUID) bool {
+	var req dto.AdminPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "masukkan password admin untuk melanjutkan")
+		return false
+	}
+	if err := h.svc.VerifyPassword(admin, req.Password); err != nil {
+		errorResponse(c, http.StatusForbidden, err.Error())
+		return false
+	}
+	return true
+}
+
+func (h *AdminHandler) confirmed(fn func(c *gin.Context, admin, user uuid.UUID) error, message string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		admin, target, ok := h.ids(c)
+		if !ok || !h.checkPassword(c, admin) {
+			return
+		}
+		if err := fn(c, admin, target); err != nil {
+			serviceErrorResponse(c, err)
+			return
+		}
+		successResponse(c, http.StatusOK, message, nil)
+	}
+}
+
+func (h *AdminHandler) UserDetail(c *gin.Context) {
+	_, target, ok := h.ids(c)
+	if !ok {
+		return
+	}
+	result, err := h.svc.UserDetail(target)
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "detail pengguna", result)
+}
+
+func (h *AdminHandler) Activity(c *gin.Context) {
+	var filter dto.AuthEventFilter
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		errorResponse(c, http.StatusBadRequest, "filter tidak valid")
+		return
+	}
+	result, err := h.svc.AuthEvents(filter)
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "aktivitas akun", result)
+}
+
+func (h *AdminHandler) ListAnnouncements(c *gin.Context) {
+	result, err := h.svc.ListAnnouncements()
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "daftar pengumuman", result)
+}
+
+func (h *AdminHandler) ActiveAnnouncements(c *gin.Context) {
+	result, err := h.svc.ActiveAnnouncements()
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "pengumuman aktif", result)
+}
+
+func (h *AdminHandler) CreateAnnouncement(c *gin.Context) {
+	admin, ok := getUserID(c)
+	if !ok {
+		unauthorizedResponse(c)
+		return
+	}
+	var req dto.AnnouncementRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "isi pengumuman 1–280 karakter, jenis info atau warning")
+		return
+	}
+	result, err := h.svc.CreateAnnouncement(admin, req)
+	if err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusCreated, "pengumuman dipasang", result)
+}
+
+func (h *AdminHandler) EndAnnouncement(c *gin.Context) {
+	admin, target, ok := h.ids(c)
+	if !ok {
+		return
+	}
+	if err := h.svc.EndAnnouncement(admin, target); err != nil {
+		serviceErrorResponse(c, err)
+		return
+	}
+	successResponse(c, http.StatusOK, "pengumuman diakhiri", nil)
 }
 
 func (h *AdminHandler) ids(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
@@ -97,7 +214,7 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 
 func (h *AdminHandler) ResetLink(c *gin.Context) {
 	admin, target, ok := h.ids(c)
-	if !ok {
+	if !ok || !h.checkPassword(c, admin) {
 		return
 	}
 	result, err := h.svc.ResetLink(admin, target)

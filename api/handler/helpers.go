@@ -62,7 +62,8 @@ func serviceErrorResponse(c *gin.Context, err error) {
 		errors.Is(err, service.ErrDebtPaymentNotFound),
 		errors.Is(err, service.ErrGoalNotFound),
 		errors.Is(err, service.ErrAdminUserNotFound),
-		errors.Is(err, service.ErrInviteNotFound):
+		errors.Is(err, service.ErrInviteNotFound),
+		errors.Is(err, service.ErrAnnouncementGone):
 		errorResponse(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrCategoryTypeMismatch),
 		errors.Is(err, service.ErrBudgetCategoryNotExpense),
@@ -74,7 +75,8 @@ func serviceErrorResponse(c *gin.Context, err error) {
 		errors.Is(err, service.ErrAdjustmentNoChange),
 		errors.Is(err, service.ErrNoOpeningBalance),
 		errors.Is(err, service.ErrRecurringEndBeforeStart),
-		errors.Is(err, service.ErrDebtOverpaid):
+		errors.Is(err, service.ErrDebtOverpaid),
+		errors.Is(err, service.ErrAnnouncementEnds):
 		errorResponse(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrTransactionIsTransferFee),
 		errors.Is(err, service.ErrWalletNotEmpty),

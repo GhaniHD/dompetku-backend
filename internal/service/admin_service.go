@@ -11,6 +11,7 @@ import (
 	"dompetku/internal/dto"
 	"dompetku/internal/model"
 	"dompetku/internal/repository"
+	"dompetku/pkg/crypto"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -22,6 +23,9 @@ var (
 	ErrAdminInvalidStatus = errors.New("aksi ini tidak bisa dilakukan untuk status akun saat ini")
 	ErrAdminProtected     = errors.New("akun admin tidak bisa diubah dari sini")
 	ErrInviteNotFound     = errors.New("undangan tidak ditemukan")
+	ErrAdminPassword      = errors.New("password admin salah")
+	ErrAnnouncementGone   = errors.New("pengumuman tidak ditemukan atau sudah berakhir")
+	ErrAnnouncementEnds   = errors.New("waktu berakhir pengumuman harus di masa depan")
 )
 
 const resetLinkTTL = 24 * time.Hour
@@ -39,16 +43,25 @@ type AdminService interface {
 	CreateInvite(adminID uuid.UUID, req dto.CreateInviteRequest) (*dto.InviteResponse, error)
 	RevokeInvite(adminID, inviteID uuid.UUID) error
 	Logs(limit int) ([]dto.AdminLogResponse, error)
+	VerifyPassword(adminID uuid.UUID, password string) error
+	UserDetail(userID uuid.UUID) (*dto.AdminUserDetail, error)
+	AuthEvents(filter dto.AuthEventFilter) ([]dto.AuthEventResponse, error)
+	ForceLogout(adminID, userID uuid.UUID, client dto.ClientInfo) error
+	ListAnnouncements() ([]dto.AnnouncementResponse, error)
+	CreateAnnouncement(adminID uuid.UUID, req dto.AnnouncementRequest) (*dto.AnnouncementResponse, error)
+	EndAnnouncement(adminID, id uuid.UUID) error
+	ActiveAnnouncements() ([]dto.AnnouncementResponse, error)
 }
 
 type adminService struct {
-	db    *gorm.DB
-	notif NotificationService
-	now   func() time.Time
+	db       *gorm.DB
+	notif    NotificationService
+	activity Activity
+	now      func() time.Time
 }
 
-func NewAdminService(db *gorm.DB, notif NotificationService) AdminService {
-	return &adminService{db: db, notif: notif, now: time.Now}
+func NewAdminService(db *gorm.DB, notif NotificationService, activity Activity) AdminService {
+	return &adminService{db: db, notif: notif, activity: activity, now: time.Now}
 }
 
 func (s *adminService) Summary() (*dto.AdminSummaryResponse, error) {
@@ -62,7 +75,7 @@ func (s *adminService) Summary() (*dto.AdminSummaryResponse, error) {
 			COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
 			COUNT(*) FILTER (WHERE last_login_at >= ?) AS active30d,
 			COUNT(*) FILTER (WHERE created_at >= ?) AS new7d
-		FROM users WHERE deleted_at IS NULL`, now.AddDate(0, 0, -30), now.AddDate(0, 0, -7)).
+		FROM users WHERE deleted_at IS NULL AND role = 'user'`, now.AddDate(0, 0, -30), now.AddDate(0, 0, -7)).
 		Row().Scan(&out.TotalUsers, &out.Pending, &out.Active, &out.Suspended, &out.Rejected, &out.Active30d, &out.New7d)
 	if err != nil {
 		return nil, err
@@ -70,17 +83,184 @@ func (s *adminService) Summary() (*dto.AdminSummaryResponse, error) {
 	err = s.db.Model(&model.Invite{}).
 		Where("revoked_at IS NULL AND expires_at > ? AND used_count < max_uses", now).
 		Count(&out.ActiveInvites).Error
+	if err != nil {
+		return nil, err
+	}
+	err = s.db.Raw(`SELECT
+			(SELECT COUNT(*) FROM users WHERE role = 'user' AND deleted_at IS NULL AND last_seen_at >= ?),
+			(SELECT COUNT(*) FROM auth_events WHERE event = 'login_failed' AND created_at >= ?)`,
+		now.Add(-OnlineWindow), now.Add(-24*time.Hour)).Row().Scan(&out.OnlineNow, &out.LoginFailed24h)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.db.Raw(`SELECT h.hour, COUNT(u.id) AS users
+		FROM generate_series(date_trunc('hour', CAST(? AS timestamptz)) - interval '23 hours', date_trunc('hour', CAST(? AS timestamptz)), interval '1 hour') AS h(hour)
+		LEFT JOIN presence_hours p ON p.hour = h.hour
+		LEFT JOIN users u ON u.id = p.user_id AND u.role = 'user'
+		GROUP BY h.hour ORDER BY h.hour`, now, now).Scan(&out.Online24h).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.Raw(`SELECT w.week, COUNT(u.id) AS count
+		FROM generate_series(date_trunc('week', CAST(? AS timestamptz)) - interval '7 weeks', date_trunc('week', CAST(? AS timestamptz)), interval '1 week') AS w(week)
+		LEFT JOIN users u ON u.role = 'user' AND u.deleted_at IS NULL AND u.created_at >= w.week AND u.created_at < w.week + interval '1 week'
+		GROUP BY w.week ORDER BY w.week`, now, now).Scan(&out.Registrations).Error; err != nil {
+		return nil, err
+	}
+	err = s.db.Raw(`SELECT email, COUNT(*) AS attempts, COUNT(DISTINCT ip) AS ips, MAX(created_at) AS last_at
+		FROM auth_events WHERE event IN ('login_failed', 'login_locked') AND created_at >= ?
+		GROUP BY email HAVING COUNT(*) >= 5 ORDER BY attempts DESC LIMIT 10`, now.Add(-time.Hour)).Scan(&out.Suspicious).Error
+	if out.Suspicious == nil {
+		out.Suspicious = []dto.SuspiciousLogin{}
+	}
 	return &out, err
 }
 
-func (s *adminService) ListUsers(filter dto.AdminUserFilter) ([]dto.AdminUserResponse, error) {
-	q := s.db.Table("users u").
+func (s *adminService) VerifyPassword(adminID uuid.UUID, password string) error {
+	var admin model.User
+	if err := s.db.Where("id = ? AND role = ?", adminID, model.RoleAdmin).First(&admin).Error; err != nil {
+		return ErrAdminPassword
+	}
+	if !crypto.CheckPasswordHash(password, admin.Password) {
+		return ErrAdminPassword
+	}
+	return nil
+}
+
+func (s *adminService) userQuery() *gorm.DB {
+	return s.db.Table("users u").
 		Select(`u.id, u.name, u.email, u.role, u.status, u.status_reason, u.created_at, u.approved_at, u.last_login_at,
+			u.last_seen_at, u.last_seen_at >= ? AS online, u.last_login_device,
 			i.code AS invite_code,
 			(SELECT COUNT(*) FROM wallets w WHERE w.user_id = u.id AND w.deleted_at IS NULL) AS wallets,
-			(SELECT COUNT(*) FROM transactions t WHERE t.user_id = u.id AND t.deleted_at IS NULL) AS transactions`).
+			(SELECT COUNT(*) FROM transactions t WHERE t.user_id = u.id AND t.deleted_at IS NULL) AS transactions`, s.now().Add(-OnlineWindow)).
 		Joins("LEFT JOIN invites i ON i.id = u.invite_id").
 		Where("u.deleted_at IS NULL")
+}
+
+func (s *adminService) UserDetail(userID uuid.UUID) (*dto.AdminUserDetail, error) {
+	var users []dto.AdminUserResponse
+	if err := s.userQuery().Where("u.id = ?", userID).Scan(&users).Error; err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, ErrAdminUserNotFound
+	}
+	events, err := s.AuthEvents(dto.AuthEventFilter{UserID: userID.String(), Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	return &dto.AdminUserDetail{User: users[0], Events: events}, nil
+}
+
+func (s *adminService) AuthEvents(filter dto.AuthEventFilter) ([]dto.AuthEventResponse, error) {
+	limit := filter.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	q := s.db.Table("auth_events e").
+		Select("e.id, e.user_id, u.name AS user_name, e.email, e.event, e.detail, e.ip, e.device, e.created_at").
+		Joins("LEFT JOIN users u ON u.id = e.user_id").
+		Where("e.created_at >= ?", s.now().Add(-activityRetention))
+	if filter.Event != "" {
+		q = q.Where("e.event = ?", filter.Event)
+	}
+	if filter.UserID != "" {
+		q = q.Where("e.user_id = ?", filter.UserID)
+	}
+	if term := strings.TrimSpace(filter.Query); term != "" {
+		like := "%" + strings.ToLower(term) + "%"
+		q = q.Where("LOWER(e.email) LIKE ? OR LOWER(COALESCE(u.name, '')) LIKE ? OR e.ip LIKE ?", like, like, like)
+	}
+	out := []dto.AuthEventResponse{}
+	err := q.Order("e.created_at DESC").Limit(limit).Scan(&out).Error
+	return out, err
+}
+
+func (s *adminService) ForceLogout(adminID, userID uuid.UUID, client dto.ClientInfo) error {
+	user, err := s.transition(adminID, userID, "force_logout", []string{model.UserActive}, func(*model.User) map[string]any {
+		return map[string]any{"token_version": gorm.Expr("token_version + 1"), "session_reason": model.SessionAdmin, "last_seen_at": nil}
+	}, "")
+	if err != nil {
+		return err
+	}
+	s.activity.Forget(userID)
+	s.activity.Record(&userID, user.Email, model.EventForcedLogout, "dikeluarkan oleh admin", client)
+	return nil
+}
+
+func announcementResponse(a model.Announcement, now time.Time) dto.AnnouncementResponse {
+	return dto.AnnouncementResponse{
+		ID: a.ID, Message: a.Message, Level: a.Level, EndsAt: a.EndsAt, EndedAt: a.EndedAt, CreatedAt: a.CreatedAt,
+		Active: a.EndedAt == nil && (a.EndsAt == nil || a.EndsAt.After(now)),
+	}
+}
+
+func (s *adminService) ListAnnouncements() ([]dto.AnnouncementResponse, error) {
+	var list []model.Announcement
+	if err := s.db.Order("created_at DESC").Limit(50).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	now := s.now()
+	out := make([]dto.AnnouncementResponse, 0, len(list))
+	for _, a := range list {
+		out = append(out, announcementResponse(a, now))
+	}
+	return out, nil
+}
+
+func (s *adminService) ActiveAnnouncements() ([]dto.AnnouncementResponse, error) {
+	var list []model.Announcement
+	now := s.now()
+	if err := s.db.Where("ended_at IS NULL AND (ends_at IS NULL OR ends_at > ?)", now).Order("created_at DESC").Limit(5).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	out := make([]dto.AnnouncementResponse, 0, len(list))
+	for _, a := range list {
+		out = append(out, announcementResponse(a, now))
+	}
+	return out, nil
+}
+
+func (s *adminService) CreateAnnouncement(adminID uuid.UUID, req dto.AnnouncementRequest) (*dto.AnnouncementResponse, error) {
+	level := req.Level
+	if level == "" {
+		level = model.AnnouncementInfo
+	}
+	if req.EndsAt != nil && !req.EndsAt.After(s.now()) {
+		return nil, ErrAnnouncementEnds
+	}
+	a := model.Announcement{Message: strings.TrimSpace(req.Message), Level: level, EndsAt: req.EndsAt, CreatedBy: adminID}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&a).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.AdminLog{AdminID: adminID, Action: "announcement_create", Detail: truncate(a.Message, 120)}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	resp := announcementResponse(a, s.now())
+	return &resp, nil
+}
+
+func (s *adminService) EndAnnouncement(adminID, id uuid.UUID) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Announcement{}).Where("id = ? AND ended_at IS NULL", id).Update("ended_at", s.now())
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrAnnouncementGone
+		}
+		return tx.Create(&model.AdminLog{AdminID: adminID, Action: "announcement_end"}).Error
+	})
+}
+
+func (s *adminService) ListUsers(filter dto.AdminUserFilter) ([]dto.AdminUserResponse, error) {
+	q := s.userQuery()
+	if filter.Online {
+		q = q.Where("u.role = ? AND u.last_seen_at >= ?", model.RoleUser, s.now().Add(-OnlineWindow))
+	}
 	if filter.Status != "" {
 		q = q.Where("u.status = ?", filter.Status)
 	}

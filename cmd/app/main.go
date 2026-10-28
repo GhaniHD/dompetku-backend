@@ -63,6 +63,7 @@ func main() {
 			}
 		}),
 		fx.Invoke(service.StartScheduler),
+		fx.Invoke(service.StartActivityCleanup),
 		fx.Invoke(StartServer),
 	)
 

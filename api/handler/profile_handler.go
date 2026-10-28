@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"dompetku/internal/dto"
+	"dompetku/internal/model"
 	"dompetku/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -18,10 +19,11 @@ type ProfileHandler struct {
 	profileService service.ProfileService
 	userRepo       repository.UserRepository
 	cfg            *config.AppConf
+	activity       service.Activity
 }
 
-func NewProfileHandler(profileService service.ProfileService, userRepo repository.UserRepository, cfg *config.AppConf) *ProfileHandler {
-	return &ProfileHandler{profileService: profileService, userRepo: userRepo, cfg: cfg}
+func NewProfileHandler(profileService service.ProfileService, userRepo repository.UserRepository, cfg *config.AppConf, activity service.Activity) *ProfileHandler {
+	return &ProfileHandler{profileService: profileService, userRepo: userRepo, cfg: cfg, activity: activity}
 }
 
 // RegisterRoutes mendaftarkan semua route profil ke router group yang sudah
@@ -129,6 +131,7 @@ func (h *ProfileHandler) ChangePassword(c *gin.Context) {
 		errorResponse(c, http.StatusInternalServerError, "terjadi kesalahan internal")
 		return
 	}
+	h.activity.Record(&user.ID, user.Email, model.EventPasswordChanged, "dari halaman profil", clientInfo(c))
 	token, err := utils.GenerateToken(user.ID, user.Email, h.cfg.JWTSecret, user.TokenVersion)
 	if err != nil {
 		errorResponse(c, http.StatusInternalServerError, "terjadi kesalahan internal")

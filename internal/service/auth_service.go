@@ -18,6 +18,7 @@ import (
 	"dompetku/pkg/crypto"
 	"dompetku/pkg/utils"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -37,7 +38,9 @@ type AuthService interface {
 	Register(ctx context.Context, req dto.RegisterRequest, client dto.ClientInfo) (*dto.RegisterResponse, error)
 	Login(ctx context.Context, req dto.LoginRequest, client dto.ClientInfo) (*dto.AuthResponse, error)
 	CheckInvite(code string) (*dto.InviteCheckResponse, error)
-	ResetPassword(req dto.ResetPasswordRequest) error
+	ResetPassword(req dto.ResetPasswordRequest, client dto.ClientInfo) error
+	Logout(ctx context.Context, userID uuid.UUID, client dto.ClientInfo) error
+	RecordLoginLocked(email string, client dto.ClientInfo)
 }
 
 type authService struct {
@@ -45,10 +48,11 @@ type authService struct {
 	userRepo repository.UserRepository
 	notif    NotificationService
 	cfg      *config.AppConf
+	activity Activity
 }
 
-func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, notif NotificationService, cfg *config.AppConf) AuthService {
-	return &authService{db: db, userRepo: userRepo, notif: notif, cfg: cfg}
+func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, notif NotificationService, cfg *config.AppConf, activity Activity) AuthService {
+	return &authService{db: db, userRepo: userRepo, notif: notif, cfg: cfg, activity: activity}
 }
 
 func normalizeEmail(email string) string {
@@ -166,9 +170,9 @@ func (s *authService) notifyAdmins(user *model.User) {
 func (s *authService) startSession(ctx context.Context, user *model.User, client dto.ClientInfo) (string, error) {
 	var version int
 	err := s.db.WithContext(ctx).Raw(`UPDATE users
-		SET token_version = token_version + 1, session_reason = ?, last_login_at = ?, last_login_device = ?, last_login_ip = ?
+		SET token_version = token_version + 1, session_reason = ?, last_login_at = ?, last_seen_at = ?, last_login_device = ?, last_login_ip = ?
 		WHERE id = ? RETURNING token_version`,
-		model.SessionLogin, time.Now(), truncate(utils.DescribeDevice(client.UserAgent), 120), truncate(client.IP, 64), user.ID).
+		model.SessionLogin, time.Now(), time.Now(), truncate(utils.DescribeDevice(client.UserAgent), 120), truncate(client.IP, 64), user.ID).
 		Scan(&version).Error
 	if err != nil {
 		return "", err
@@ -185,20 +189,53 @@ func (s *authService) Login(ctx context.Context, req dto.LoginRequest, client dt
 
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil || user == nil {
+		s.activity.Record(nil, email, model.EventLoginFailed, "email tidak terdaftar", client)
 		return nil, ErrInvalidCredentials
 	}
 	if !crypto.CheckPasswordHash(req.Password, user.Password) {
+		s.activity.Record(&user.ID, email, model.EventLoginFailed, "password salah", client)
 		return nil, ErrInvalidCredentials
 	}
 	if err := StatusError(user.Status); err != nil {
+		s.activity.Record(&user.ID, email, model.EventLoginFailed, err.Error(), client)
 		return nil, err
 	}
 
+	detail := ""
+	if user.LastSeenAt != nil && time.Since(*user.LastSeenAt) < OnlineWindow && user.LastLoginDevice != "" {
+		detail = "mengeluarkan sesi di " + user.LastLoginDevice
+	}
 	token, err := s.startSession(ctx, user, client)
 	if err != nil {
 		return nil, err
 	}
+	s.activity.Forget(user.ID)
+	s.activity.Record(&user.ID, email, model.EventLogin, detail, client)
 	return &dto.AuthResponse{Token: token, User: userResponse(user)}, nil
+}
+
+func (s *authService) RecordLoginLocked(email string, client dto.ClientInfo) {
+	email = normalizeEmail(email)
+	var userID *uuid.UUID
+	if user, err := s.userRepo.FindByEmail(context.Background(), email); err == nil && user != nil {
+		userID = &user.ID
+	}
+	s.activity.Record(userID, email, model.EventLoginLocked, "terlalu banyak percobaan gagal", client)
+}
+
+// Logout mengakhiri sesi di server, sehingga token yang tersalin di tempat lain
+// ikut tidak berlaku.
+func (s *authService) Logout(ctx context.Context, userID uuid.UUID, client dto.ClientInfo) error {
+	var email string
+	err := s.db.WithContext(ctx).Raw(`UPDATE users
+		SET token_version = token_version + 1, session_reason = ?, last_seen_at = NULL
+		WHERE id = ? RETURNING email`, model.SessionLogout, userID).Scan(&email).Error
+	if err != nil {
+		return err
+	}
+	s.activity.Forget(userID)
+	s.activity.Record(&userID, email, model.EventLogout, "", client)
+	return nil
 }
 
 func userResponse(user *model.User) dto.UserResponse {
@@ -232,7 +269,7 @@ func hashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *authService) ResetPassword(req dto.ResetPasswordRequest) error {
+func (s *authService) ResetPassword(req dto.ResetPasswordRequest, client dto.ClientInfo) error {
 	if err := validatePassword(req.Password); err != nil {
 		return err
 	}
@@ -263,6 +300,13 @@ func (s *authService) ResetPassword(req dto.ResetPasswordRequest) error {
 		if res.RowsAffected == 0 {
 			return ErrResetTokenInvalid
 		}
-		return tx.Model(&t).UpdateColumn("used_at", now).Error
+		if err := tx.Model(&t).UpdateColumn("used_at", now).Error; err != nil {
+			return err
+		}
+		var email string
+		tx.Raw("SELECT email FROM users WHERE id = ?", t.UserID).Scan(&email)
+		s.activity.Forget(t.UserID)
+		s.activity.Record(&t.UserID, email, model.EventPasswordReset, "lewat link atur ulang", client)
+		return nil
 	})
 }
