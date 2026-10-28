@@ -90,3 +90,17 @@ func allowResend(t *testing.T, userID string) {
 	t.Helper()
 	gdb.Exec("UPDATE email_codes SET created_at = created_at - interval '2 minutes' WHERE user_id = ?", userID)
 }
+
+func TestImportantMailWakesWorker(t *testing.T) {
+	withMail(t)
+	u := verifiedUser(t)
+	for len(outboxSvc.Wake()) > 0 {
+		<-outboxSvc.Wake()
+	}
+	call(t, "POST", "/api/auth/forgot-password", "", map[string]any{"email": u.Email})
+	select {
+	case <-outboxSvc.Wake():
+	case <-time.After(time.Second):
+		t.Fatal("email penting harus langsung membangunkan pengirim")
+	}
+}

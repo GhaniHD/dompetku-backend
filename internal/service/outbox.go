@@ -27,25 +27,37 @@ var mailBackoff = []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute
 type Outbox interface {
 	Enqueue(userID *uuid.UUID, to, kind string, priority int, r Rendered) error
 	Flush(now time.Time) (int, error)
+	Wake() <-chan struct{}
 }
 
 type outbox struct {
 	db     *gorm.DB
 	mailer Mailer
+	wake   chan struct{}
 }
 
 func NewOutbox(db *gorm.DB, mailer Mailer) Outbox {
-	return &outbox{db: db, mailer: mailer}
+	return &outbox{db: db, mailer: mailer, wake: make(chan struct{}, 1)}
 }
+
+// Wake memberi sinyal saat email penting masuk antrean agar langsung dikirim.
+func (o *outbox) Wake() <-chan struct{} { return o.wake }
 
 func (o *outbox) Enqueue(userID *uuid.UUID, to, kind string, priority int, r Rendered) error {
 	if !o.mailer.Enabled() || to == "" {
 		return nil
 	}
-	return o.db.Create(&model.EmailOutbox{
+	err := o.db.Create(&model.EmailOutbox{
 		UserID: userID, ToEmail: to, Subject: truncate(r.Subject, 200), HTML: r.HTML, Text: r.Text,
 		Kind: kind, Priority: priority, Unsubscribe: r.Unsubscribe, Status: model.MailPending, NextAttemptAt: time.Now(),
 	}).Error
+	if err == nil && priority == 0 {
+		select {
+		case o.wake <- struct{}{}:
+		default:
+		}
+	}
+	return err
 }
 
 func startOfDayWIB(now time.Time) time.Time {
@@ -104,8 +116,8 @@ func (o *outbox) Flush(now time.Time) (int, error) {
 	return sent, nil
 }
 
-// StartMailWorker mengirim antrean email setiap 20 detik dan menjalankan
-// email terjadwal (ringkasan mingguan, pengingat) setiap 15 menit.
+// StartMailWorker mengirim antrean email setiap 20 detik (email penting
+// langsung saat masuk antrean) dan menjalankan email terjadwal setiap 15 menit.
 func StartMailWorker(lc fx.Lifecycle, o Outbox, emails EmailService) {
 	ctx, cancel := context.WithCancel(context.Background())
 	lc.Append(fx.Hook{
@@ -116,14 +128,19 @@ func StartMailWorker(lc fx.Lifecycle, o Outbox, emails EmailService) {
 				defer send.Stop()
 				defer jobs.Stop()
 				emails.RunScheduled(time.Now())
+				flush := func() {
+					if _, err := o.Flush(time.Now()); err != nil {
+						log.Printf("[mail] antrean: %v", err)
+					}
+				}
 				for {
 					select {
 					case <-ctx.Done():
 						return
+					case <-o.Wake():
+						flush()
 					case <-send.C:
-						if _, err := o.Flush(time.Now()); err != nil {
-							log.Printf("[mail] antrean: %v", err)
-						}
+						flush()
 					case <-jobs.C:
 						emails.RunScheduled(time.Now())
 					}
