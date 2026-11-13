@@ -45,6 +45,14 @@ PostgreSQL**, memakai **Uber FX** untuk dependency injection antar layer
   Hasil di-cache 24 jam selama datanya tidak berubah; tanpa `CLAUDE_API_KEY`
   endpoint tetap jalan dengan insight kosong.
 - **Profil**: update profil, ganti password, upload avatar, hapus akun.
+- **Persetujuan & undangan**: pendaftar baru menunggu persetujuan admin, kecuali
+  memakai kode undangan. Satu akun hanya aktif di satu perangkat.
+- **Email** lewat SMTP (Brevo): kode verifikasi (OTP), lupa password, ganti email,
+  ringkasan mingguan, pengingat H-1, peringatan login perangkat baru. Dikirim
+  lewat antrean dengan coba ulang dan batas 250 email/hari. Tanpa `SMTP_HOST`,
+  email mati dan verifikasi tidak diwajibkan.
+- **Konsol super admin** terpisah: persetujuan, pengguna, aktivitas login,
+  undangan, pengumuman, statistik email. Admin tidak bisa melihat data keuangan.
 
 ## Tech Stack
 
@@ -55,7 +63,8 @@ PostgreSQL**, memakai **Uber FX** untuk dependency injection antar layer
 | Dependency Injection | Uber FX (`go.uber.org/fx`) |
 | Auth | JWT (`golang-jwt/jwt/v5`), hashing password via `golang.org/x/crypto` |
 | Integrasi AI | Anthropic Claude API (HTTP client custom di `pkg/claude`) |
-| Deployment | Docker (multi-stage build) + Docker Compose |
+| Deployment | VPS Ubuntu 24.04: binary Go + systemd, Caddy (HTTPS), PostgreSQL 17, GitHub Actions |
+| Email | SMTP (Brevo), webhook bounce |
 
 ## Arsitektur
 
@@ -85,7 +94,7 @@ otomatis ke `NewRouter` di `api/routes.go`.
 
 ## Menjalankan Proyek
 
-### Opsi A — Docker Compose (disarankan)
+### Opsi A — Docker Compose (pengembangan lokal)
 
 ```bash
 cp .env.example .env   # sesuaikan isinya, lihat tabel environment variable
@@ -102,7 +111,7 @@ go mod download
 go run ./cmd/app/main.go
 ```
 
-Health check: `GET /health` → `OK`.
+Health check: `GET /health` → `OK`, atau `503 DB_DOWN` kalau database tidak menjawab dalam 2 detik.
 
 ## Environment Variable
 
@@ -116,6 +125,19 @@ Health check: `GET /health` → `OK`.
 | `DB_SSLMODE` | Mode SSL koneksi database | `disable` (di Docker Compose diset `require`) |
 | `JWT_SECRET` | Secret untuk sign JWT, minimal 32 karakter. Server menolak start kalau kurang. | - |
 | `PORT` / `SERVER_PORT` | Port HTTP server | `8090` |
+| `BIND_ADDR` | Alamat dengar server. Di VPS diisi `127.0.0.1` agar hanya bisa dijangkau lewat Caddy | `0.0.0.0` |
+| `ADMIN_EMAILS` | Email akun admin, dipisah koma | - |
+| `CORS_ORIGINS` | Origin frontend yang diizinkan, dipisah koma | domain myfulus |
+| `TRUSTED_PROXIES` | Proxy yang dipercaya untuk IP asli pengguna. Di VPS: `127.0.0.1,::1` | jaringan privat |
+| `SMTP_HOST` | Host SMTP. Kosong = email mati | - |
+| `SMTP_PORT` | Port SMTP (`2525` untuk Brevo) | `587` |
+| `SMTP_USER` / `SMTP_PASS` | Login SMTP dan SMTP key | - |
+| `MAIL_FROM` / `MAIL_REPLY_TO` | Pengirim dan alamat balasan | `MyFulus <noreply@myfulus.my.id>` / - |
+| `APP_URL` | Alamat frontend, untuk link di email | `https://myfulus.my.id` |
+| `API_URL` | Alamat publik backend tanpa `/api`, untuk tombol berhenti langganan satu klik | - |
+| `BREVO_WEBHOOK_SECRET` | Secret di URL webhook Brevo (`?secret=`) | - |
+| `ADMIN_WHATSAPP` | Nomor WA admin untuk tombol "Kabari admin" setelah daftar | - |
+| `EMAIL_DOMAIN_CHECK` | Cek MX domain email saat daftar (`false` untuk mematikan) | `true` |
 | `CLAUDE_API_KEY` | API key Anthropic untuk fitur analisis keuangan AI (`/api/analysis`) | - |
 | `CLAUDE_MODEL` | Model Claude yang dipakai analisis | `claude-sonnet-4-20250514` |
 | `CLAUDE_API_URL` | Endpoint Messages API (diganti hanya untuk test) | `https://api.anthropic.com/v1/messages` |
@@ -269,7 +291,8 @@ Semua entity pakai `uuid` sebagai primary key dan soft-delete (`gorm.DeletedAt`)
 
 `AutoMigrate` hanya dipakai untuk tabel awal. Perubahan skema berikutnya ada di
 folder `migrations/` dan **wajib dijalankan berurutan** di database (misalnya
-lewat SQL Editor Supabase) **sebelum** kode yang membutuhkannya di-deploy.
+dengan `psql -v ON_ERROR_STOP=1 -f`) **sebelum** kode yang membutuhkannya di-deploy.
+Semua file aman dijalankan ulang.
 
 | File | Isi |
 | --- | --- |
@@ -279,6 +302,17 @@ lewat SQL Editor Supabase) **sebelum** kode yang membutuhkannya di-deploy.
 | `004_budget_cycle.up.sql` | Kolom `users.budget_start_day` (default 1 = bulan kalender) |
 | `005_recurring_transactions.up.sql` | Tabel `recurring_transactions`, kolom `transactions.recurring_id` |
 | `006_debts_goals.up.sql` | Tabel `debts`, `debt_movements`, `goals` |
+| `007_admin_approval.up.sql` | Role, status, persetujuan admin, undangan, log admin |
+| `008_income_type.up.sql` | Jenis pemasukan pengguna (gaji/tidak tetap) |
+| `009_single_session.up.sql` | Satu akun satu perangkat |
+| `010_savings_budget.up.sql` | Anggaran tabungan |
+| `011_performance_indexes.up.sql` | Index query per pengguna dan tanggal |
+| `012_foreign_key_indexes.up.sql` | Index kolom foreign key (mempercepat pulihkan backup) |
+| `013_timestamptz.up.sql` | Semua kolom waktu jadi `timestamptz` |
+| `014_daily_categories.up.sql` | Pilihan kategori jatah harian |
+| `015_purge_deleted_users.up.sql` | Hapus permanen akun yang sudah dihapus |
+| `016_super_admin.up.sql` | Aktivitas login, kehadiran online, pengumuman |
+| `017_email.up.sql` | Verifikasi email, kode OTP, antrean email |
 | `check_balance.sql` | Cek konsistensi saldo (hanya membaca). Hasil 0 baris = semua saldo cocok |
 
 Invarian yang dijaga: `balance = opening_balance + Σ income − Σ expense + Σ transfer masuk − Σ transfer keluar + Σ penyesuaian + Σ pergerakan hutang/piutang`.
@@ -303,8 +337,37 @@ go test -count=1 ./...
 Linux/macOS: `make test TEST_DB_PASSWORD=...`. Tanpa `TEST_DB_NAME`, integration
 test otomatis dilewati.
 
-GitHub Actions (`.github/workflows/test.yml`) menjalankan build, `go vet`, dan
-semua test dengan PostgreSQL 17 di setiap push.
+GitHub Actions (`.github/workflows/test.yml`) menjalankan build, `go vet`, semua
+test dengan PostgreSQL 17, dan `govulncheck` di setiap push.
+
+## Deployment (produksi)
+
+Produksi berjalan di satu VPS Ubuntu 24.04. Frontend ada di Vercel.
+
+```
+https://api.myfulus.my.id → Caddy (HTTPS) → 127.0.0.1:8090 (myfulus-api, systemd) → PostgreSQL 17 (localhost)
+```
+
+| Bagian | Lokasi |
+| --- | --- |
+| Program | `/opt/myfulus/releases/<versi>/myfulus-api`, versi aktif `/opt/myfulus/current` |
+| Ganti versi + rollback otomatis | `/opt/myfulus/bin/activate <folder-versi>` (cek `/health` 30 detik) |
+| Environment | `/etc/myfulus/api.env` (640 root:myfulus) |
+| Upload | `/var/lib/myfulus/uploads` |
+| Service | `myfulus-api.service`, log: `journalctl -u myfulus-api -f` |
+| Backup | `myfulus-backup.timer` setiap 02.30 WIB, terenkripsi `age`, ke Google Drive |
+
+**Deploy otomatis**: push ke `master` → workflow `test` lulus → workflow `deploy`
+(`.github/workflows/deploy.yml`) membangun binary, mengirimnya ke VPS lewat user
+`deploy`, lalu menjalankan `activate`. Kalau `/health` gagal, server kembali ke
+versi sebelumnya dan workflow ditandai gagal. Secret yang dibutuhkan: `VPS_HOST`,
+`VPS_SSH_KEY`, `VPS_KNOWN_HOSTS`.
+
+**Rollback manual**: `ls -1dt /opt/myfulus/releases/*`, lalu
+`sudo /opt/myfulus/bin/activate /opt/myfulus/releases/<versi-sebelumnya>`.
+
+Panduan lengkap (setup server, migrasi data, backup, pemulihan) ada di dokumen
+"Panduan Deploy MyFulus ke VPS" dan "Catatan Deploy MyFulus ke VPS".
 
 ## Catatan
 

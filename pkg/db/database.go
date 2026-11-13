@@ -38,8 +38,8 @@ func ConnectDB(conf *config.AppConf) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Koneksi dipakai ulang agar request paralel tidak membuka koneksi TLS baru ke database.
-	sqlDB.SetMaxOpenConns(10)
+	// 25 koneksi cukup untuk 500 pengguna dan tetap di bawah max_connections PostgreSQL (50).
+	sqlDB.SetMaxOpenConns(25)
 	sqlDB.SetMaxIdleConns(10)
 	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	sqlDB.SetConnMaxLifetime(30 * time.Minute)

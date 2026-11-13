@@ -1,0 +1,50 @@
+name: deploy
+
+on:
+  workflow_run:
+    workflows: ["test"]
+    types: [completed]
+    branches: [master]
+
+concurrency: deploy-produksi
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o myfulus-api ./cmd/app
+
+      - name: Siapkan SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Kirim dan aktifkan
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          REL=/opt/myfulus/releases/$(date -u +%Y%m%d%H%M%S)-${SHA::7}
+          ssh deploy@"$VPS_HOST" "mkdir -p $REL"
+          scp myfulus-api deploy@"$VPS_HOST":"$REL/myfulus-api"
+          ssh deploy@"$VPS_HOST" "chmod 755 $REL/myfulus-api && sudo /opt/myfulus/bin/activate $REL"
+
+      - name: Bersihkan kunci
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519
