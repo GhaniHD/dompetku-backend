@@ -74,6 +74,11 @@ Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 if ($ok) {
     Write-Host "`nBERHASIL: versi $sha aktif di server." -ForegroundColor Green
     Write-Host "Cek di MyFulus Ops: CI/CD > Versi di server."
-} else {
-    Fail "versi baru tidak sehat. Server sudah kembali otomatis ke versi sebelumnya. Cek Ops > Log > Backend."
+    exit 0
 }
+$active = (ssh @opts $target "readlink -f /opt/myfulus/current")
+if ($active -and $active.Trim() -eq $rel) {
+    Write-Host "`nPERINGATAN: versi $sha aktif dan sehat, tapi skrip activate mengembalikan error. Kirim output ini ke developer." -ForegroundColor Yellow
+    exit 1
+}
+Fail "versi baru tidak sehat. Server kembali ke $active. Cek Ops > Log > Backend."
